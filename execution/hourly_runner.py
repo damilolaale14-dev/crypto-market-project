@@ -372,9 +372,9 @@ def run_hourly_for_symbol(
                 with open(HOUR_MEMORY_FILE + ".tmp", "w") as f:
                     json.dump(last_hour_seen, f, indent=2)
                 os.replace(HOUR_MEMORY_FILE + ".tmp", HOUR_MEMORY_FILE)
-                _tg_debug(f"[HOUR MEMORY UPDATED] {symbol} — {latest_hour_ts}")
+                print(f"[HOUR MEMORY UPDATED] {symbol} — {latest_hour_ts}")
             else:
-                _tg_debug(f"[HOUR MEMORY UNCHANGED] {symbol} — already at {latest_hour_ts}")
+                print(f"[HOUR MEMORY UNCHANGED] {symbol} — already at {latest_hour_ts}")
 
         pm.flush()
 
