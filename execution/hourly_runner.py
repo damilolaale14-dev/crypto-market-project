@@ -154,7 +154,7 @@ def run_hourly_for_symbol(
 
                 # FIX: detect poisoned cursor — timestamp more than 1 hour in the future
                 # This would permanently block all processing for this symbol
-                if last_seen_ts > pd.Timestamp(now_check, tz="UTC") + pd.Timedelta(hours=1):
+                if last_seen_ts > pd.Timestamp(now_check).tz_convert("UTC") + pd.Timedelta(hours=1):
                     _tg_debug(f"[FAST GATE POISONED] {symbol} — cursor {last_seen_ts} is in the future, deleting and proceeding")
                     notifier.send_text(
                         f"⚠️ *CURSOR POISONED*\n"
@@ -164,7 +164,7 @@ def run_hourly_for_symbol(
                         f"Deleting and reprocessing last 12 bars"
                     )
                     os.remove(cursor_file)
-                elif last_seen_ts >= pd.Timestamp(current_5m_boundary, tz="UTC"):
+                elif last_seen_ts >= pd.Timestamp(current_5m_boundary).tz_convert("UTC"):
                     _tg_debug(f"[FAST GATE] {symbol} — cursor {last_seen_ts} >= boundary {current_5m_boundary}, skipping")
                     return None
                 else:
