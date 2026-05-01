@@ -152,8 +152,6 @@ def run_hourly_for_symbol(
                 minutes_floored = (now_check.minute // 5) * 5
                 current_5m_boundary = now_check.replace(minute=minutes_floored, second=0, microsecond=0)
 
-                # FIX: detect poisoned cursor — timestamp more than 1 hour in the future
-                # This would permanently block all processing for this symbol
                 if last_seen_ts > pd.Timestamp(now_check).tz_convert("UTC") + pd.Timedelta(hours=1):
                     _tg_debug(f"[FAST GATE POISONED] {symbol} — cursor {last_seen_ts} is in the future, deleting and proceeding")
                     notifier.send_text(
@@ -165,10 +163,10 @@ def run_hourly_for_symbol(
                     )
                     os.remove(cursor_file)
                 elif last_seen_ts >= pd.Timestamp(current_5m_boundary).tz_convert("UTC"):
-                    _tg_debug(f"[FAST GATE] {symbol} — cursor {last_seen_ts} >= boundary {current_5m_boundary}, skipping")
+                    print(f"[FAST GATE] {symbol} — cursor {last_seen_ts} >= boundary {current_5m_boundary}, skipping")
                     return None
                 else:
-                    _tg_debug(f"[FAST GATE PASS] {symbol} — cursor {last_seen_ts} < boundary {current_5m_boundary}, proceeding")
+                    print(f"[FAST GATE PASS] {symbol} — cursor {last_seen_ts} < boundary {current_5m_boundary}, proceeding")
 
             except Exception as e:
                 _tg_debug(f"[FAST GATE ERROR] {symbol} — {e}, proceeding")
@@ -263,7 +261,7 @@ def run_hourly_for_symbol(
         lltf_frozen['ltf_index'] = lltf_frozen['ltf_index'].astype(int)
 
         # FIX 5: diagnostic — log how many bars survive dropna
-        _tg_debug(f"[FROZEN DIAG] {symbol} — bars after dropna={len(lltf_frozen)}")
+        print(f"[FROZEN DIAG] {symbol} — bars after dropna={len(lltf_frozen)}")
 
         # ==========================================================
         # NEW 1H CANDLE DETECTION
@@ -309,7 +307,7 @@ def run_hourly_for_symbol(
         )
 
         # FIX 5: diagnostic — log new_bars count so we know if streaming engine sees anything
-        _tg_debug(f"[NEW BARS DIAG] {symbol} — new_bars={len(new_bars)} last_seen={last_seen} latest_ts={latest_ts}")
+        print(f"[NEW BARS DIAG] {symbol} — new_bars={len(new_bars)} last_seen={last_seen} latest_ts={latest_ts}")
 
         if new_bars.empty:
             return None
