@@ -177,14 +177,30 @@ def fast_replay_symbol(symbol: str, from_ts=None, to_ts=None, notify_trades=True
     )
 
 def fast_replay_all(from_ts=None, to_ts=None, notify_trades=True, symbols=None):
-    reset_replay_state(symbols=symbols)
-    target_symbols = symbols if symbols else SYMBOLS
-
+    notifier = TelegramNotifier()
+    
+    # 1. Write lock FIRST before touching any state
     with open("data/replay_lock.json", "w") as f:
         json.dump({"locked": True, "started": pd.Timestamp.now(tz="UTC").isoformat()}, f)
+    
     try:
+        # 2. Reset state AFTER lock is in place
+        reset_replay_state(symbols=symbols)
+        
+        target_symbols = symbols if symbols else SYMBOLS
+
         for symbol in target_symbols:
-            fast_replay_symbol(symbol, from_ts=from_ts, to_ts=to_ts, notify_trades=notify_trades)
+            # 3. Fetch fresh data since cache was wiped
+            try:
+                from data_pipeline.updater import update_symbol
+                update_symbol(symbol)  # repopulate cache before replay reads it
+            except Exception as e:
+                notifier.send_text(f"💥 *REPLAY FETCH FAILED*\n`{symbol}`\n`{str(e)[:200]}`")
+                continue
+
+            fast_replay_symbol(
+                symbol, from_ts=from_ts, to_ts=to_ts, notify_trades=notify_trades
+            )
     finally:
         if os.path.exists("data/replay_lock.json"):
             os.remove("data/replay_lock.json")

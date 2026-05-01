@@ -76,11 +76,13 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, LINK
 # ==========================================================
 
-SYMBOL = "ETHUSDT"
+SYMBOL = "DOGEUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
 HTF_INTERVAL = "4h"
+
+LEVERAGE = 28
 
 # LLTF_LIMIT = 630720
 # LTF_LIMIT = 52560   # ~30 days of 1h candles
@@ -141,7 +143,7 @@ ltf_df = generate_signal(ltf_df, htf_df)
 # BACKTEST
 # ==========================================================
 
-backtester = SignalBacktester(ltf_df, htf_df=htf_df, lltf_df=lltf_df)
+backtester = SignalBacktester(ltf_df, htf_df=htf_df, lltf_df=lltf_df, leverage=LEVERAGE)
 
 backtest_output = backtester.run()
 

@@ -55,7 +55,7 @@ class TelegramNotifier:
             f"Market Order: `{symbol} {quantity}`\n"
             f"Stop Order: `{stop_loss:.6f}`"
         )
-        self._send(msg)
+        self._send(msg, parse_mode="Markdown")
 
     def notify_close(
         self,
@@ -92,7 +92,7 @@ class TelegramNotifier:
             f"PnL: `${pnl_usd:+.3f}`\n"
             f"Trailing Activated: `{trailing_activated}`"
         )
-        self._send(msg)
+        self._send(msg, parse_mode="Markdown")
 
     def send_text(self, message: str) -> None:
         self._send(message, parse_mode="MarkdownV2")
@@ -146,5 +146,12 @@ class TelegramNotifier:
             response = requests.post(self.api_url, json=payload, timeout=10)
             response.raise_for_status()
         except Exception as e:
-            # never let a failed notification crash the engine
             print(f"[TELEGRAM SEND FAILED] {e} | message={message[:100]}")
+            try:
+                fallback = {
+                    "chat_id": self.chat_id,
+                    "text": f"[SEND FAILED] {str(e)[:200]}\nOriginal: {message[:100]}"
+                }
+                requests.post(self.api_url, json=fallback, timeout=10)
+            except Exception:
+                pass

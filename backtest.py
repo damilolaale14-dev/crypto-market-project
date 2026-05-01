@@ -6,14 +6,15 @@ class SignalBacktester:
         self,
         df,
         htf_df=None,
-        lltf_df = None,
+        lltf_df=None,
         initial_balance=1000,
         fixed_risk_per_trade=10.0,
         fee=0.0005,
         atr_period=14,
         atr_mult=1.5,
         be_trigger_r=1.2,
-        trailing=False
+        trailing=False,
+        leverage=1,
     ):
         self.df = df.copy()
         self.htf_df = htf_df.copy() if htf_df is not None else None
@@ -38,6 +39,7 @@ class SignalBacktester:
         self.atr_mult = atr_mult
         self.trailing = trailing
 
+        self.leverage = max(1, leverage)
         self.max_bars_in_trade = 6          # ~6 hours max edge lifespan
         self.expansion_lookback = 3         # detect shrinking expansion
         self.trap_wick_ratio = 0.6          # wick dominance threshold
@@ -221,7 +223,15 @@ class SignalBacktester:
             "MFE": 0.0
         }
 
+        # Fee applies to notional, not margin — so leverage increases fee cost
         self.balance -= abs(units * price) * self.fee
+        
+        # Liquidation price tracking
+        margin = (units * price) / self.leverage
+        if side == 1:
+            self.liquidation_price = price * (1 - 1 / self.leverage * 0.9)
+        else:
+            self.liquidation_price = price * (1 + 1 / self.leverage * 0.9)
 
     # ------------------------
     # Exit
@@ -231,13 +241,14 @@ class SignalBacktester:
             (price - self.entry_price) * self.units
             if self.position == 1 else
             (self.entry_price - price) * self.units
-        )
+        ) * self.leverage
 
         if reason == "stop_loss" and self.be_activated:
             reason = "break_even"
 
         self.balance += pnl
         self.balance -= abs(self.units * price) * self.fee
+        self.liquidation_price = None
 
         entry_i = self.current_trade["entry_idx"]
         bars_held = idx - entry_i
@@ -456,6 +467,20 @@ class SignalBacktester:
                 return
 
         # =============================
+        # LIQUIDATION CHECK (leverage)
+        # must come before hard stop —
+        # liquidation can fire closer to
+        # entry than the SL at high leverage
+        # =============================
+        if self.leverage > 1 and hasattr(self, 'liquidation_price') and self.liquidation_price is not None:
+            if self.position == 1 and low <= self.liquidation_price:
+                self._exit(self.liquidation_price, idx, "liquidated")
+                return
+            elif self.position == -1 and high >= self.liquidation_price:
+                self._exit(self.liquidation_price, idx, "liquidated")
+                return
+
+        # =============================
         # HARD STOP ALWAYS LAST
         # =============================
         if self.position == 1:
@@ -521,6 +546,8 @@ class SignalBacktester:
             trades_df["direction"] = trades_df["side"].map({1: "LONG", -1: "SHORT"})
             trades_df["pnl_pct"]   = trades_df["pnl"] / self.initial_balance * 100
 
+        liquidations = len(trades_df[trades_df["exit_reason"] == "liquidated"]) if not trades_df.empty else 0
+
         summary = {
             "initial_balance": self.initial_balance,
             "final_balance":   round(self.balance, 2),
@@ -530,6 +557,8 @@ class SignalBacktester:
             "win_rate":        round((trades_df["pnl"] > 0).mean() * 100, 2) if not trades_df.empty else 0.0,
             "avg_win":         trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean() if not trades_df.empty else 0.0,
             "avg_loss":        trades_df.loc[trades_df["pnl"] < 0, "pnl"].mean() if not trades_df.empty else 0.0,
+            "leverage":        self.leverage,
+            "liquidations":    liquidations,
         }
 
         return {
