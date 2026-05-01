@@ -337,9 +337,16 @@ def run_hourly_for_symbol(
             if not pd.isna(row_5m.get("final_signal", float("nan"))) and row_5m["final_signal"] != 0:
                 notifier.send_text(
                     f"🚨 *SIGNAL REACHED LIFECYCLE*\n"
-                    f"{symbol}\n"
-                    f"ts: `{_}`\n"
-                    f"signal: `{row_5m['final_signal']}`"
+                    f"Symbol: `{symbol}`\n"
+                    f"5m bar ts: `{_}`\n"
+                    f"signal: `{row_5m['final_signal']}`\n"
+                    f"parent 1H row ts: `{ltf_row.name}`\n"
+                    f"parent 1H open: `{ltf_row['open']}`\n"
+                    f"df last 1H candle: `{df.index[-1]}`\n"
+                    f"last_seen cursor: `{last_seen}`\n"
+                    f"new_bars first: `{new_bars.index[0]}`\n"
+                    f"new_bars last: `{new_bars.index[-1]}`\n"
+                    f"lltf_frozen last: `{lltf_frozen.index[-1]}`"
                 )
 
             # FIX 5: diagnostic — log what bar_signal is actually passed to pm.update

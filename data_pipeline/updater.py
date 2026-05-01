@@ -109,11 +109,15 @@ def update_symbol(symbol: str):
                 df.index      = pd.to_datetime(df.index,      utc=True)
                 df_htf.index  = pd.to_datetime(df_htf.index,  utc=True)
                 df_lltf.index = pd.to_datetime(df_lltf.index, utc=True)
+                # strip any forming candle so generate_signal never sees partial data
+                df     = df[df.index < now_hour]
+                df_htf = df_htf[df_htf.index < now_hour]
                 return df, df_htf, df_lltf
         except Exception as e:
             print(f"[SKIP CHECK FAILED] {symbol} — {e}, proceeding with full fetch")
 
-    now = now_hour  # rest of function expects top-of-hour truncated now
+    now_full = now   # preserve full-precision timestamp for 5m fetch
+    now = now_hour   # 1H and 4H fetches use top-of-hour only
 
     df = None
     last_ts = None
@@ -139,7 +143,7 @@ def update_symbol(symbol: str):
     # --------------------------------------------------
 
     fetch_start = start_required if df is None else last_ts + timedelta(hours=1)
-    fetch_end = now
+    fetch_end = now_hour  # 1H candles: only fetch closed candles
 
     print("[FETCH WINDOW]")
     print("start:", fetch_start)
@@ -219,7 +223,7 @@ def update_symbol(symbol: str):
 
     # Determine fetch window
     htf_fetch_start = start_required if df_htf is None else last_htf_ts + timedelta(hours=4)
-    htf_fetch_end = now
+    htf_fetch_end = now_hour  # 4H candles: only fetch closed candles
 
     print("[FETCH HTF WINDOW]")
     print("start:", htf_fetch_start)
@@ -289,7 +293,7 @@ def update_symbol(symbol: str):
                 last_lltf_ts = df_lltf.index[-1]
 
     lltf_fetch_start = start_required if df_lltf is None else last_lltf_ts + timedelta(minutes=5)
-    lltf_fetch_end   = now
+    lltf_fetch_end   = now_full  # 5m candles: use full-precision now so every cron fire fetches new bars
 
     print("[FETCH LLTF WINDOW]")
     print("start:", lltf_fetch_start)
@@ -322,5 +326,9 @@ def update_symbol(symbol: str):
     os.replace(tmp_lltf, path_lltf)
 
     print("[SAVE] LLTF cache updated | candles:", len(df_lltf))
+
+    # strip forming candle before returning so generate_signal never sees partial 1H/4H data
+    df     = df[df.index < now_hour]
+    df_htf = df_htf[df_htf.index < now_hour]
 
     return df, df_htf, df_lltf
