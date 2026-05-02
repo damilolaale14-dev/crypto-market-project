@@ -115,7 +115,6 @@ class PositionManager:
         # ROLLING ATR (precomputed — O(1) lookup)
         # =====================================================
         atr = float(current_5m_row["ATR"]) if "ATR" in current_5m_row.index and not pd.isna(current_5m_row["ATR"]) else None
-        atr_1h = float(current_5m_row["ATR_1H"]) if "ATR_1H" in current_5m_row.index and not pd.isna(current_5m_row["ATR_1H"]) else atr
 
         current_ts = current_5m_row.name
 
@@ -330,16 +329,13 @@ class PositionManager:
 
             atr = float(atr)
 
-            # Use 1H ATR for stop placement — stop must be outside 1H noise, not 5m noise
-            entry_atr = atr_1h if (atr_1h is not None and atr_1h > 0 and not np.isnan(atr_1h)) else atr
+            _tg_debug(f"[DEBUG ENTRY] {symbol} signal={signal} atr={atr} ts={current_ts}")
 
-            _tg_debug(f"[DEBUG ENTRY] {symbol} signal={signal} atr_5m={atr} atr_1h={entry_atr} ts={current_ts}")
-
-            if entry_atr <= 0:
-                _tg_debug(f"[ENTRY BLOCKED] {symbol} @ {current_ts} — entry_atr={entry_atr}, skipping")
+            if atr <= 0:
+                _tg_debug(f"[ENTRY BLOCKED] {symbol} @ {current_ts} — atr={atr}, skipping")
                 return {"state": "FLAT"}
 
-            new_pos = self._open(symbol, signal, entry_price, current_ts, entry_atr)
+            new_pos = self._open(symbol, signal, entry_price, current_ts, atr)
 
             if new_pos:
                 # initialize bar history with entry candle

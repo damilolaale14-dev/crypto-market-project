@@ -248,24 +248,13 @@ def run_hourly_for_symbol(
         non_zero_signals = (lltf_df["final_signal"] != 0).sum()
         # _tg_debug(f"[SIGNAL DIAG] {symbol} — non-null={non_null_signals} non-zero={non_zero_signals} total_5m_bars={len(lltf_df)}")
 
-        # Precompute rolling ATR on 5m dataframe (used for exit logic)
+        # Precompute rolling ATR on 5m dataframe
         tr_5m = pd.concat([
             lltf_df['high'] - lltf_df['low'],
             (lltf_df['high'] - lltf_df['close'].shift()).abs(),
             (lltf_df['low']  - lltf_df['close'].shift()).abs()
         ], axis=1).max(axis=1)
         lltf_df['ATR'] = tr_5m.rolling(14).mean()
-
-        # Precompute rolling ATR on 1H dataframe (used for stop placement at entry)
-        tr_1h = pd.concat([
-            df['high'] - df['low'],
-            (df['high'] - df['close'].shift()).abs(),
-            (df['low']  - df['close'].shift()).abs()
-        ], axis=1).max(axis=1)
-        df['ATR_1H'] = tr_1h.rolling(14).mean()
-
-        # Forward-fill 1H ATR onto 5m bars so lifecycle can read it at entry
-        lltf_df['ATR_1H'] = df['ATR_1H'].reindex(lltf_df.index, method='ffill')
 
         lltf_frozen = lltf_df.copy()
         lltf_frozen = lltf_frozen.dropna(subset=['ltf_index'])
