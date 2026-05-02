@@ -323,23 +323,15 @@ def run_hourly_for_symbol(
 
             ltf_row = df.iloc[int(row_5m["ltf_index"])]
 
-            if not pd.isna(row_5m.get("final_signal", float("nan"))) and row_5m["final_signal"] != 0:
-                notifier.send_text(
-                    f"🚨 *SIGNAL REACHED LIFECYCLE*\n"
-                    f"Symbol: `{symbol}`\n"
-                    f"5m bar ts: `{_}`\n"
-                    f"signal: `{row_5m['final_signal']}`\n"
-                    f"parent 1H row ts: `{ltf_row.name}`\n"
-                    f"parent 1H open: `{ltf_row['open']}`\n"
-                    f"df last 1H candle: `{df.index[-1]}`\n"
-                    f"last_seen cursor: `{last_seen}`\n"
-                    f"new_bars first: `{new_bars.index[0]}`\n"
-                    f"new_bars last: `{new_bars.index[-1]}`\n"
-                    f"lltf_frozen last: `{lltf_frozen.index[-1]}`"
+            if not pd.isna(row_5m.get("final_signal", float("nan"))) and row_5m["final_signal"] != 0 and symbol not in pm.positions:
+                notifier.debug(
+                    f"🚨 SIGNAL | {symbol} | ts={_} | "
+                    f"signal={row_5m['final_signal']} | "
+                    f"1H_ts={ltf_row.name} | "
+                    f"1H_open={ltf_row['open']:.6f} | "
+                    f"df_last={df.index[-1]} | "
+                    f"ltf_index={int(row_5m['ltf_index'])}"
                 )
-
-            # FIX 5: diagnostic — log what bar_signal is actually passed to pm.update
-            # _tg_debug(f"[PM UPDATE DIAG] {symbol} ts={_} bar_signal={bar_signal} has_position={symbol in pm.positions}")
 
             result = pm.update(
                 df=df,
@@ -351,6 +343,18 @@ def run_hourly_for_symbol(
             )
             if isinstance(result, dict) and result.get("state") in ("OPEN", "CLOSED"):
                 bar_results.append(result)
+
+            has_position = symbol in pm.positions
+            if has_position:
+                pos = pm.positions[symbol]
+                notifier.debug(
+                    f"📊 TRADE ACTIVE | {symbol} | ts={_} | "
+                    f"side={'LONG' if pos['direction'] == 1 else 'SHORT'} | "
+                    f"entry={pos['entry_price']:.6f} | "
+                    f"stop={pos['stop_loss']:.6f} | "
+                    f"bars={pos.get('bars_in_trade', 0)} | "
+                    f"pnl={pos.get('pnl_r', 0.0):+.3f}R"
+                )
 
         # FIX 1: replay-end close REMOVED from here — caller (fast_replay_symbol) owns it
         # This was the bug causing open+close on every single bar
