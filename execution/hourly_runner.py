@@ -314,7 +314,7 @@ def run_hourly_for_symbol(
 
         bar_results = []
 
-        notifier.debug(f"[REPLAY LOOP] {symbol} — processing {len(new_bars)} bars from {new_bars.index[0]} to {new_bars.index[-1]}")
+        # notifier.debug(f"[REPLAY LOOP] {symbol} — processing {len(new_bars)} bars from {new_bars.index[0]} to {new_bars.index[-1]}")
         for _, row_5m in new_bars.iterrows():
 
             if pd.isna(row_5m["final_signal"]):
