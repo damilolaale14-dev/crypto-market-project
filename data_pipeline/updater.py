@@ -103,13 +103,20 @@ def update_symbol(symbol: str):
 
                 # return cached data in both cases — fresh candle path was
                 # silently falling through to full fetch and rewriting parquets
-                df      = pd.read_parquet(path_ltf)
-                df_htf  = pd.read_parquet(path_htf)
                 df_lltf = pd.read_parquet(path_lltf)
-                df.index      = pd.to_datetime(df.index,      utc=True)
-                df_htf.index  = pd.to_datetime(df_htf.index,  utc=True)
                 df_lltf.index = pd.to_datetime(df_lltf.index, utc=True)
-                # strip any forming candle so generate_signal never sees partial data
+
+                # check if 1H cache also has the latest closed candle
+                # if not, fall through to full fetch so it gets updated
+                ltf_check = pd.read_parquet(path_ltf)
+                ltf_check.index = pd.to_datetime(ltf_check.index, utc=True)
+                if ltf_check.index[-1] < now_hour:
+                    print(f"[SKIP BYPASSED] {symbol} — 5m current but 1H cache behind ({ltf_check.index[-1]} < {now_hour}), fetching")
+                    raise Exception("1H cache stale — force full fetch")
+
+                df      = ltf_check
+                df_htf  = pd.read_parquet(path_htf)
+                df_htf.index  = pd.to_datetime(df_htf.index,  utc=True)
                 df     = df[df.index <= now_hour]
                 df_htf = df_htf[df_htf.index <= now_hour]
                 return df, df_htf, df_lltf
