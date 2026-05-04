@@ -76,7 +76,7 @@ class TelegramNotifier:
         pnl_usd   = pnl_r * risk_usd
 
         exit_ts_str  = self._fmt_ts(timestamp)
-        entry_ts_str = entry_time or "unknown"
+        entry_ts_str = self._fmt_ts(entry_time) if entry_time else "unknown"
 
         msg = (
             f"🔴 *TRADE CLOSED*\n"

@@ -60,13 +60,26 @@ def run_hourly():
         )
 
     symbol_summaries = []
+    failed_symbols = []
     for symbol in SYMBOLS:
-        result = run_hourly_for_symbol(symbol)
-        if isinstance(result, tuple):
-            summary, _ = result
-        else:
-            summary = result
-        symbol_summaries.append((symbol, summary))
+        try:
+            result = run_hourly_for_symbol(symbol)
+            if isinstance(result, tuple):
+                summary, _ = result
+            else:
+                summary = result
+            symbol_summaries.append((symbol, summary))
+        except Exception as sym_err:
+            import traceback
+            tb = traceback.format_exc()
+            failed_symbols.append(symbol)
+            notifier.send_text(
+                f"💥 *SYMBOL CRASH*\n"
+                f"Symbol: `{symbol}`\n"
+                f"Error: `{str(sym_err)[:300]}`\n"
+                f"Traceback:\n`{tb[:600]}`"
+            )
+            symbol_summaries.append((symbol, None))
 
     now = datetime.now(timezone.utc)
     local_now = now + pd.Timedelta(hours=1)  # WAT = UTC+1
@@ -379,7 +392,7 @@ def run_hourly_for_symbol(
                 symbol=symbol,
                 lltf_df=lltf_frozen,
                 external_signal=bar_signal,
-                external_row=ltf_row,
+                external_row=signal_birth_row,
                 current_5m_row=row_5m
             )
             if isinstance(result, dict) and result.get("state") in ("OPEN", "CLOSED"):
