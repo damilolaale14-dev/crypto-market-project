@@ -287,6 +287,7 @@ def run_hourly_for_symbol(
             last_seen = pd.Timestamp(raw) if raw else None
 
         if is_live and last_seen == latest_ts:
+            notifier.debug(f"[CURSOR AT TIP] {symbol} — last_seen={last_seen} == latest_ts={latest_ts}, nothing to do")
             return None
 
         if last_seen is None and not replay and not forced_time:
@@ -310,6 +311,12 @@ def run_hourly_for_symbol(
         print(f"[NEW BARS DIAG] {symbol} — new_bars={len(new_bars)} last_seen={last_seen} latest_ts={latest_ts}")
 
         if new_bars.empty:
+            notifier.debug(
+                f"[EMPTY NEW BARS] {symbol} — no new bars to process\n"
+                f"last_seen={last_seen}\n"
+                f"latest_ts={latest_ts}\n"
+                f"lltf_frozen_range={lltf_frozen.index[0]} → {lltf_frozen.index[-1]}"
+            )
             return None
 
         bar_results = []
@@ -404,6 +411,25 @@ def run_hourly_for_symbol(
                 print(f"[HOUR MEMORY UNCHANGED] {symbol} — already at {latest_hour_ts}")
 
         pm.flush()
+
+        # ============================================================
+        # DEBUG — dump full state after every symbol run
+        # ============================================================
+        try:
+            import json as _json
+            _reentry = {k: {"direction": v, "locked_at": str(pm._reentry_lock_ts.get(k))} for k, v in pm._reentry_lock.items()}
+            _executed = [s for s in pm._executed_signals if symbol in s]
+            _positions = {k: {"direction": v.get("direction"), "bars": v.get("bars_in_trade"), "entry": v.get("entry_time")} for k, v in pm.positions.items()}
+            notifier.debug(
+                f"[STATE DUMP] {symbol}\n"
+                f"cursor_saved={new_bars.index[-1].isoformat() if not new_bars.empty else 'unchanged'}\n"
+                f"positions={_positions}\n"
+                f"reentry_lock={_reentry}\n"
+                f"executed_signals_for_symbol={_executed}"
+            )
+        except Exception as _e:
+            notifier.debug(f"[STATE DUMP FAILED] {symbol} — {_e}")
+        # ============================================================
 
         new_cursor = new_bars.index[-1] if not new_bars.empty else replay_cursor
         return (bar_results if bar_results else None), new_cursor

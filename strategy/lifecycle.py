@@ -281,7 +281,13 @@ class PositionManager:
             expiry_limit = self.SIGNAL_EXPIRY_BARS_LIVE if self._is_live else self.SIGNAL_EXPIRY_BARS
             _tg_debug(f"[EXPIRY CHECK] {symbol} ts={current_ts} signal_age={signal_age_bars} limit={expiry_limit} signal={signal}")
             if signal_age_bars > expiry_limit:
-                _tg_debug(f"[SIGNAL EXPIRED] {symbol} age={signal_age_bars} bars > {expiry_limit} — SIGNAL KILLED")
+                _tg_debug(
+                    f"[SIGNAL EXPIRED] {symbol}\n"
+                    f"age={signal_age_bars} bars > limit={expiry_limit}\n"
+                    f"external_row.name={external_row.name}\n"
+                    f"current_ts={current_ts}\n"
+                    f"signal KILLED"
+                )
                 signal = 0
             
         # =====================================================
@@ -294,9 +300,16 @@ class PositionManager:
 
             if symbol in self._reentry_lock:
                 locked_dir = self._reentry_lock[symbol]
+                locked_at = self._reentry_lock_ts.get(symbol, "unknown")
+                _tg_debug(
+                    f"[REENTRY LOCK STATE] {symbol}\n"
+                    f"locked_dir={locked_dir} current_signal={signal}\n"
+                    f"locked_at={locked_at}\n"
+                    f"would_block={signal == locked_dir}"
+                )
                 if signal == locked_dir:
-                    locked_at = self._reentry_lock_ts.get(symbol, "unknown")
                     _tg_debug(f"[ENTRY BLOCKED — REENTRY LOCK] {symbol} dir={signal} locked_at={locked_at}")
+                    # NOTE: no return here intentionally until we confirm fix is needed
 
             signal_ts = current_5m_row.name
 
@@ -313,26 +326,44 @@ class PositionManager:
             )
 
             if signal_id in self._executed_signals:
-                _tg_debug(f"[EXECUTED SIGNAL BLOCK] {symbol} signal_id={signal_id} — already executed, skipping")
+                _tg_debug(
+                    f"[EXECUTED SIGNAL BLOCK] {symbol}\n"
+                    f"signal_id={signal_id}\n"
+                    f"all_executed_for_symbol={[s for s in self._executed_signals if symbol in s]}"
+                )
                 return {"state": "FLAT"}
 
             self._executed_signals.add(signal_id)
-            _tg_debug(f"[EXECUTED SIGNAL REGISTERED] {symbol} signal_id={signal_id}")
+            _tg_debug(
+                f"[EXECUTED SIGNAL REGISTERED] {symbol}\n"
+                f"signal_id={signal_id}\n"
+                f"total_executed={len(self._executed_signals)}"
+            )
 
             raw_entry   = float(external_row["open"])
             cost_mult   = self.TOTAL_COST_BPS / 10_000
             entry_price = raw_entry * (1 + cost_mult) if signal == 1 else raw_entry * (1 - cost_mult)
 
             if atr is None or atr <= 0 or np.isnan(atr):
-                _tg_debug(f"[WARN ATR INVALID] {symbol} ts={current_ts} atr={atr}")
+                _tg_debug(
+                    f"[WARN ATR INVALID] {symbol}\n"
+                    f"ts={current_ts} atr={atr}\n"
+                    f"ENTRY WILL BE BLOCKED"
+                )
                 atr = 0.000001
 
             atr = float(atr)
 
-            _tg_debug(f"[DEBUG ENTRY] {symbol} signal={signal} atr={atr} ts={current_ts}")
+            _tg_debug(
+                f"[PRE-OPEN] {symbol}\n"
+                f"signal={signal} atr={atr}\n"
+                f"current_ts={current_ts}\n"
+                f"entry_price_raw={float(external_row['open'])}\n"
+                f"positions_before_open={list(self.positions.keys())}"
+            )
 
             if atr <= 0:
-                _tg_debug(f"[ENTRY BLOCKED] {symbol} @ {current_ts} — atr={atr}, skipping")
+                _tg_debug(f"[ENTRY BLOCKED — ATR] {symbol} @ {current_ts} atr={atr}")
                 return {"state": "FLAT"}
 
             new_pos = self._open(symbol, signal, entry_price, current_ts, atr)
@@ -573,6 +604,13 @@ class PositionManager:
             )
 
         print(f"[OPEN EXECUTED] {symbol} dir={direction} price={price}")
+        _tg_debug(
+            f"[OPEN EXECUTED] {symbol}\n"
+            f"dir={direction} price={price}\n"
+            f"stop={stop} atr={atr}\n"
+            f"risk_usd={risk_usd} qty={quantity}\n"
+            f"ts={ts}"
+        )
 
         self._dirty = True
 

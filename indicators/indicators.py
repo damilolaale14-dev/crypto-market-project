@@ -1592,9 +1592,10 @@ def generate_signal(df, htf_df, atr_mult=1.5):
     LONG_CONDITION &= HTF_LONG_OK
     SHORT_CONDITION &= HTF_SHORT_OK
 
-    df['signal'] = 0
-    df.loc[LONG_CONDITION, 'signal'] = 1
-    df.loc[SHORT_CONDITION, 'signal'] = -1
+    # df['signal'] = 0
+    # df.loc[LONG_CONDITION, 'signal'] = 1
+    # df.loc[SHORT_CONDITION, 'signal'] = -1
+    df['signal'] = 1
 
     df['final_signal'] = df['signal'].shift(1)
 
