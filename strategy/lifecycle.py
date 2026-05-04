@@ -59,7 +59,7 @@ class PositionManager:
     SPREAD_BPS   = 3      # 0.03% half-spread (taker crosses spread)
     TOTAL_COST_BPS = SLIPPAGE_BPS + SPREAD_BPS   # 8bps per side
     SIGNAL_EXPIRY_BARS      = 6    # replay: signal dies after 6×5m = 30 minutes
-    SIGNAL_EXPIRY_BARS_LIVE = 11   # live: allow up to 55 minutes for scheduler jitter
+    SIGNAL_EXPIRY_BARS_LIVE = 2   # live: allow up to 55 minutes for scheduler jitter
 
     def __init__(self, persist=True, notify=True):
         self.persist  = persist

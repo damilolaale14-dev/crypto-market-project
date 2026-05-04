@@ -352,6 +352,18 @@ def run_hourly_for_symbol(
 
             ltf_row = df.iloc[int(row_5m["ltf_index"])]
 
+            # Store the 1H row where this signal first appeared so expiry
+            # is measured from signal birth, not the current 1H candle.
+            # We find the earliest 1H bar that has this signal value.
+            if bar_signal != 0:
+                signal_birth_idx = int(row_5m["ltf_index"])
+                # walk backwards to find where this signal run started
+                while signal_birth_idx > 0 and df["final_signal"].iloc[signal_birth_idx - 1] == bar_signal:
+                    signal_birth_idx -= 1
+                signal_birth_row = df.iloc[signal_birth_idx]
+            else:
+                signal_birth_row = ltf_row
+
             if not pd.isna(row_5m.get("final_signal", float("nan"))) and row_5m["final_signal"] != 0 and symbol not in pm.positions:
                 notifier.debug(
                     f"🚨 SIGNAL | {symbol} | ts={_} | "

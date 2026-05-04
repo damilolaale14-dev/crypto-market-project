@@ -118,7 +118,19 @@ class TelegramNotifier:
 
     @staticmethod
     def _fmt_ts(ts) -> str:
-        return ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        import pandas as pd
+        if ts is None:
+            return "unknown"
+        try:
+            t = pd.Timestamp(ts)
+            if t.tzinfo is None:
+                t = t.tz_localize("UTC")
+            else:
+                t = t.tz_convert("UTC")
+            wat = t + pd.Timedelta(hours=1)
+            return wat.strftime("%Y-%m-%d %H:%M WAT")
+        except Exception:
+            return str(ts)
 
     def _escape_md(self, text: str) -> str:
         """
