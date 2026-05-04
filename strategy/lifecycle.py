@@ -309,6 +309,7 @@ class PositionManager:
                 )
                 if signal == locked_dir:
                     _tg_debug(f"[ENTRY BLOCKED — REENTRY LOCK] {symbol} dir={signal} locked_at={locked_at}")
+                    return {"state": "FLAT"}
                     # NOTE: no return here intentionally until we confirm fix is needed
 
             signal_ts = current_5m_row.name

@@ -376,8 +376,9 @@ def run_hourly_for_symbol(
                 if pd.isna(sig):
                     sig = 0
                 sig = int(sig)
-                # if this bar had a signal and no position opened, stop cursor here
-                if sig != 0 and symbol not in pm.positions:
+                # stop cursor if signal was seen but neither opened nor closed a position on this bar
+                bar_result = next((r for r in bar_results if r.get("state") in ("OPEN", "CLOSED")), None)
+                if sig != 0 and symbol not in pm.positions and bar_result is None:
                     break
                 last_clean_ts = bar_ts
 
