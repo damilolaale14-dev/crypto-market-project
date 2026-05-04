@@ -150,10 +150,16 @@ def run_hourly_for_symbol(
                     last_seen_ts = last_seen_ts.tz_convert("UTC")
                 now_check = datetime.now(timezone.utc)
                 minutes_floored = (now_check.minute // 5) * 5
-                current_5m_boundary = now_check.replace(minute=minutes_floored, second=0, microsecond=0)
+                current_5m_boundary = now_check.replace(
+                    minute=minutes_floored, second=0, microsecond=0
+                )
+                current_5m_boundary = pd.Timestamp(current_5m_boundary).tz_convert("UTC")
 
                 if last_seen_ts > pd.Timestamp(now_check).tz_convert("UTC") + pd.Timedelta(hours=1):
-                    _tg_debug(f"[FAST GATE POISONED] {symbol} — cursor {last_seen_ts} is in the future, deleting and proceeding")
+                    _tg_debug(
+                        f"[FAST GATE POISONED] {symbol} — cursor {last_seen_ts} "
+                        f"is in the future, deleting and proceeding"
+                    )
                     notifier.send_text(
                         f"⚠️ *CURSOR POISONED*\n"
                         f"Symbol: `{symbol}`\n"
@@ -162,11 +168,26 @@ def run_hourly_for_symbol(
                         f"Deleting and reprocessing last 12 bars"
                     )
                     os.remove(cursor_file)
-                elif last_seen_ts >= pd.Timestamp(current_5m_boundary).tz_convert("UTC"):
-                    print(f"[FAST GATE] {symbol} — cursor {last_seen_ts} >= boundary {current_5m_boundary}, skipping")
-                    return None
+                elif last_seen_ts >= current_5m_boundary:
+                    # Cursor is current — but only skip if we also have no open position.
+                    # If a position is open we must keep running exit checks every bar.
+                    pm_check = PositionManager(persist=True, notify=False)
+                    if symbol not in pm_check.positions:
+                        print(
+                            f"[FAST GATE] {symbol} — cursor {last_seen_ts} >= "
+                            f"boundary {current_5m_boundary}, no open position, skipping"
+                        )
+                        return None
+                    else:
+                        print(
+                            f"[FAST GATE BYPASS] {symbol} — cursor current but "
+                            f"position open, proceeding for exit checks"
+                        )
                 else:
-                    print(f"[FAST GATE PASS] {symbol} — cursor {last_seen_ts} < boundary {current_5m_boundary}, proceeding")
+                    print(
+                        f"[FAST GATE PASS] {symbol} — cursor {last_seen_ts} < "
+                        f"boundary {current_5m_boundary}, proceeding"
+                    )
 
             except Exception as e:
                 _tg_debug(f"[FAST GATE ERROR] {symbol} — {e}, proceeding")
