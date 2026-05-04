@@ -368,26 +368,16 @@ def run_hourly_for_symbol(
         # This was the bug causing open+close on every single bar
 
         # update cursor AFTER processing (live only)
-        # only advance cursor to last bar where no signal was left unhandled
+        # always advance to the last bar processed — the executed_signals set
+        # is the dedup guard, not the cursor. Leaving the cursor behind causes
+        # entire bar windows to be reprocessed on the next cron fire.
         if not replay and replay_cursor is None:
-            last_clean_ts = None
-            for bar_ts, row in new_bars.iterrows():
-                sig = row.get("final_signal", 0)
-                if pd.isna(sig):
-                    sig = 0
-                sig = int(sig)
-                # stop cursor if signal was seen but neither opened nor closed a position on this bar
-                bar_result = next((r for r in bar_results if r.get("state") in ("OPEN", "CLOSED")), None)
-                if sig != 0 and symbol not in pm.positions and bar_result is None:
-                    break
-                last_clean_ts = bar_ts
+            last_clean_ts = new_bars.index[-1] if not new_bars.empty else None
 
             if last_clean_ts is not None:
                 with open(last_5m_file + ".tmp", "w") as f:
                     json.dump(last_clean_ts.isoformat(), f)
                 os.replace(last_5m_file + ".tmp", last_5m_file)
-            # if last_clean_ts is None, cursor doesn't advance at all
-            # meaning the next run retries from the same point
 
         # ==========================================================
         # SAVE LAST PROCESSED HOUR
