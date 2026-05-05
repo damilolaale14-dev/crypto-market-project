@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, LINK
 # ==========================================================
 
-SYMBOL = "TRXUSDT"
+SYMBOL = "ZENUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -138,6 +138,7 @@ htf_df = fetch_binance(SYMBOL, HTF_INTERVAL, HTF_LIMIT)
 # ==========================================================
 
 ltf_df = generate_signal(ltf_df, htf_df)
+ltf_df['final_signal'] = ltf_df['signal'].shift(1)
 
 # ==========================================================
 # BACKTEST
