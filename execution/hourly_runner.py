@@ -6,7 +6,7 @@ from utils.log import debug, info, trade, error
 from utils.logger import log
 
 from data_pipeline.updater import update_symbol
-from indicators.indicators import generate_signal
+from indicators.indicators import generate_signal, atr_ema
 from strategy.lifecycle import PositionManager
 from execution.notifier import TelegramNotifier
 import pandas as pd
@@ -284,6 +284,7 @@ def run_hourly_for_symbol(
 
         # Use 1H ATR to match backtest — forward fill onto 5m bars
         lltf_df['ATR'] = df['ATR'].reindex(lltf_df.index, method='ffill')
+        lltf_df['ATR_5M'] = atr_ema(lltf_df, period=14)
 
         lltf_frozen = lltf_df.copy()
         lltf_frozen = lltf_frozen.dropna(subset=['ltf_index'])

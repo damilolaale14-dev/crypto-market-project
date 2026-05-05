@@ -120,12 +120,15 @@ class PositionManager:
         if position:
 
             # APPEND BAR FIRST
+            atr_5m = float(current_5m_row["ATR_5M"]) if "ATR_5M" in current_5m_row.index and not pd.isna(current_5m_row["ATR_5M"]) else None
+
             self._bar_history.setdefault(symbol, []).append({
                 "open": o,
                 "high": h,
                 "low": l,
                 "close": c,
                 "ATR": atr,
+                "ATR_5M": atr_5m,
                 "ts": current_ts,
             })
 
@@ -227,7 +230,7 @@ class PositionManager:
                 # if self._momentum_decay_exit(position):
                 #     try_exit("momentum_decay", current_price)
 
-                if self._opposite_impulse_exit(window_5m, side):
+                if self._opposite_impulse_exit(window_5m, side, position):
                     try_exit("opposite_impulse", current_price)
 
                 # ===================================================
@@ -465,27 +468,86 @@ class PositionManager:
 
             return near_low and failing_to_push
 
-    def _opposite_impulse_exit(self, window: pd.DataFrame, side: int) -> bool:
-        if len(window) < 1:
+    def _opposite_impulse_exit(self, window: pd.DataFrame, side: int, position: dict) -> bool:
+        if len(window) < 3:
             return False
 
         last = window.iloc[-1]
 
-        # Use best available ATR: rolling if warmed up, else entry bar ATR
-        atr = last["ATR"]
-        if pd.isna(atr) or atr <= 0:
-            # fall back to entry bar ATR (first bar in window)
-            atr = window.iloc[0]["ATR"]
-        if pd.isna(atr) or atr <= 0:
-            return False
+        # ══════════════════════════════════════════
+        # 1. ATR — use 5m ATR for candle body comparison
+        # fall back to 1H ATR scaled down if 5m not available
+        # ══════════════════════════════════════════
+        if "ATR_5M" in window.columns:
+            atr = window["ATR_5M"].iloc[-3:].mean()
+            if pd.isna(atr) or atr <= 0:
+                atr = window["ATR_5M"].iloc[0]
+        else:
+            atr = None
 
+        if atr is None or pd.isna(atr) or atr <= 0:
+            # fall back: scale 1H ATR down to 5m equivalent
+            atr_1h = window["ATR"].iloc[-3:].mean()
+            if pd.isna(atr_1h) or atr_1h <= 0:
+                atr_1h = window["ATR"].iloc[0]
+            if pd.isna(atr_1h) or atr_1h <= 0:
+                return False
+            atr = atr_1h * 0.20  # ~20% of 1H ATR as 5m proxy
+
+        # ══════════════════════════════════════════
+        # 2. BODY SIZE — must be a real 5m impulse
+        # ══════════════════════════════════════════
         body = abs(last["close"] - last["open"])
         big_candle = body > atr * 1.2
 
+        if not big_candle:
+            return False
+
+        # ══════════════════════════════════════════
+        # 3. DIRECTION CHECK
+        # ══════════════════════════════════════════
         if side == 1:
-            return big_candle and last["close"] < last["open"]
+            wrong_direction = last["close"] < last["open"]
         else:
-            return big_candle and last["close"] > last["open"]
+            wrong_direction = last["close"] > last["open"]
+
+        if not wrong_direction:
+            return False
+
+        # ══════════════════════════════════════════
+        # 4. CLOSE LOCATION — where did it close
+        # relative to the current stop?
+        # a candle closing near the stop is far more
+        # dangerous than one closing near MFE
+        # ══════════════════════════════════════════
+        entry = position["entry_price"]
+        stop  = position["stop_loss"]
+        R     = abs(entry - position["initial_stop"])
+
+        if R == 0:
+            return True  # safety: if R is broken, trust the body check
+
+        if side == 1:
+            close_to_stop_r = (last["close"] - stop) / R
+        else:
+            close_to_stop_r = (stop - last["close"]) / R
+
+        # if close is still more than 1.5R from stop it's a pullback not a collapse
+        if close_to_stop_r > 1.5:
+            return False
+
+        # ══════════════════════════════════════════
+        # 5. VOLUME CONFIRMATION
+        # impulse on low volume = likely noise
+        # ══════════════════════════════════════════
+        if "volume" in window.columns:
+            avg_vol = window["volume"].iloc[-10:].mean()
+            last_vol = last["volume"]
+            if len(window) >= 10 and not pd.isna(avg_vol) and avg_vol > 0:
+                if last_vol < avg_vol * 0.8:
+                    return False
+
+        return True
 
     def _stop_pressure_exit(
         self, window: pd.DataFrame, stop_price: float, side: int, R: float

@@ -51,8 +51,6 @@ class SignalBacktester:
         self.current_ltf_index = None      # tracks active 1H candle
         self.trade_taken_this_ltf = False  # did we already trade this 1H idea?
 
-        self._prepare_indicators()
-
         # -------------------------------------------------
         # Align datasets to common start date
         # -------------------------------------------------
@@ -93,6 +91,8 @@ class SignalBacktester:
             # Now conversion is safe
             self.lltf_df['ltf_index'] = self.lltf_df['ltf_index'].astype(int)
 
+        self._prepare_indicators()
+
     # ------------------------
     # Indicators
     # ------------------------
@@ -105,6 +105,15 @@ class SignalBacktester:
         ], axis=1).max(axis=1)
         df['ATR'] = tr.rolling(self.atr_period).mean()
         self.df = df
+
+        # compute 5m ATR on lltf_df for opposite impulse exit
+        if hasattr(self, 'lltf_df') and self.lltf_df is not None:
+            lltf_tr = pd.concat([
+                self.lltf_df['high'] - self.lltf_df['low'],
+                (self.lltf_df['high'] - self.lltf_df['close'].shift()).abs(),
+                (self.lltf_df['low'] - self.lltf_df['close'].shift()).abs()
+            ], axis=1).max(axis=1)
+            self.lltf_df['ATR_5M'] = lltf_tr.ewm(span=self.atr_period, adjust=False).mean()
 
     # ==========================================================
     # TRADE LIFECYCLE SETTINGS
@@ -124,20 +133,77 @@ class SignalBacktester:
         df = self.lltf_df if hasattr(self, 'lltf_df') else self.df
         return df.loc[entry_time:current_time]
     
-    def opposite_impulse_exit(self, window, side):
+    def opposite_impulse_exit(self, window, side, trade=None):
         if len(window) < 3:
             return False
 
         last = window.iloc[-1]
-        atr = window['ATR'].iloc[-1] if 'ATR' in window else (window['high'] - window['low']).rolling(14).mean().iloc[-1]
-        body = abs(last.close - last.open)
 
+        # ══════════════════════════════════════════
+        # 1. ATR — use 5m ATR for candle body comparison
+        # ══════════════════════════════════════════
+        if "ATR_5M" in window.columns:
+            atr = window["ATR_5M"].iloc[-3:].mean()
+            if pd.isna(atr) or atr <= 0:
+                atr = window["ATR_5M"].iloc[0]
+        else:
+            atr = None
+
+        if atr is None or pd.isna(atr) or atr <= 0:
+            atr_1h = window["ATR"].iloc[-3:].mean() if "ATR" in window.columns else (window['high'] - window['low']).mean()
+            atr = atr_1h * 0.20
+
+        if pd.isna(atr) or atr <= 0:
+            return False
+
+        # ══════════════════════════════════════════
+        # 2. BODY SIZE
+        # ══════════════════════════════════════════
+        body = abs(last.close - last.open)
         big_candle = body > atr * 1.2
 
+        if not big_candle:
+            return False
+
+        # ══════════════════════════════════════════
+        # 3. DIRECTION CHECK
+        # ══════════════════════════════════════════
         if side == 1:
-            return big_candle and last.close < last.open
+            wrong_direction = last.close < last.open
         else:
-            return big_candle and last.close > last.open
+            wrong_direction = last.close > last.open
+
+        if not wrong_direction:
+            return False
+
+        # ══════════════════════════════════════════
+        # 4. CLOSE LOCATION
+        # ══════════════════════════════════════════
+        if trade is not None:
+            entry = trade["entry_price"]
+            stop  = trade["stop_loss"]
+            R     = abs(entry - trade.get("ATR", abs(entry - stop)))
+
+            if R > 0:
+                if side == 1:
+                    close_to_stop_r = (last.close - stop) / R
+                else:
+                    close_to_stop_r = (stop - last.close) / R
+
+                if close_to_stop_r > 1.5:
+                    return False
+
+        # ══════════════════════════════════════════
+        # 5. VOLUME CONFIRMATION
+        # ══════════════════════════════════════════
+        if "volume" in window.columns:
+            avg_vol = window["volume"].iloc[-10:].mean()
+            last_vol = last.volume
+            if len(window) >= 10 and not pd.isna(avg_vol) and avg_vol > 0:
+                if last_vol < avg_vol * 0.8:
+                    return False
+
+        return True
         
     def stop_pressure_exit(self, window, stop_price, side):
         if len(window) < self.PRESSURE_BARS:
@@ -445,8 +511,8 @@ class SignalBacktester:
         # STAGE 0 — INCUBATION (0–30m)
         # =============================
         if bars_5m <= self.INCUBATION_BARS:
-            if self.opposite_impulse_exit(window_5m, trade['side']):
-                self._exit(current_price, idx, "opposite_impulse")
+            if self.opposite_impulse_exit(window_5m, trade['side'], trade=self.current_trade):
+                self._exit(current_price, idx, "momentum_decay")
                 return
 
         # =============================
