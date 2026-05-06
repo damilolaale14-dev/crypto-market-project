@@ -227,37 +227,22 @@ def fast_replay_symbol(symbol: str, from_ts=None, to_ts=None, notify_trades=True
         _in_last_12      = i >= len(df_1h_active) - 12
 
         if _has_nonzero_tip or _has_nonzero_5m or _in_last_12:
-            # find the exact bar where signal is non-zero in the 1H slice
-            nonzero_1h = df_signals[df_signals["final_signal"] != 0]["final_signal"].tail(5)
-
-            # check intermediate conditions at the tip bar
             tip_row = df_signals.iloc[-1]
-            _valid_break_long  = bool(tip_row.get("VALID_BREAK_LONG",  False))
-            _valid_break_short = bool(tip_row.get("VALID_BREAK_SHORT", False))
-            _compression_ok    = bool(tip_row.get("COMPRESSION_OK",    False))
-            _entry_long        = bool(tip_row.get("ENTRY_LONG",        False))
-            _entry_short       = bool(tip_row.get("ENTRY_SHORT",       False))
-            _htf_direction     = tip_row.get("HTF_DIRECTION", None)
-            _htf_quality       = tip_row.get("HTF_QUALITY",   None)
-            _htf_long_ok       = bool(_htf_direction == 1 and _htf_quality is not None and _htf_quality > 0.45)
-            _htf_short_ok      = bool(_htf_direction == -1 and _htf_quality is not None and _htf_quality > 0.45)
+            _htf_direction = tip_row.get("HTF_DIRECTION", None)
+            _htf_quality   = tip_row.get("HTF_QUALITY",   None)
 
             notifier.send_text(
                 f"🔎 *REPLAY SLICE DIAG* `{symbol}` i=`{i}`\n"
-                f"1H slice tip ts=`{df_signals.index[-1]}`\n"
-                f"final\_signal last 8 bars: `{tip_signals.tolist()}`\n"
-                f"non-zero in tip: `{non_zero_tip}`\n"
-                f"5m bars in slice: `{len(lltf)}`\n"
-                f"5m signal values: `{lltf['final_signal'].value_counts().to_dict()}`\n"
-                f"lltf dropna survivors: `{lltf['ltf_index'].notna().sum()}`\n"
-                f"— TIP BAR CONDITIONS —\n"
-                f"VALID\_BREAK\_LONG: `{_valid_break_long}` | SHORT: `{_valid_break_short}`\n"
-                f"COMPRESSION\_OK: `{_compression_ok}`\n"
-                f"ENTRY\_LONG: `{_entry_long}` | SHORT: `{_entry_short}`\n"
-                f"HTF\_DIRECTION: `{_htf_direction}` | HTF\_QUALITY: `{round(float(_htf_quality), 4) if _htf_quality is not None else None}`\n"
-                f"HTF\_LONG\_OK: `{_htf_long_ok}` | HTF\_SHORT\_OK: `{_htf_short_ok}`\n"
-                f"— LAST NON-ZERO 1H SIGNALS —\n"
-                f"`{nonzero_1h.to_dict()}`"
+                f"tip=`{df_signals.index[-1]}`\n"
+                f"sig8=`{tip_signals.tolist()}`\n"
+                f"5m=`{lltf['final_signal'].value_counts().to_dict()}`\n"
+                f"VBL=`{bool(tip_row.get('VALID_BREAK_LONG',False))}` "
+                f"COK=`{bool(tip_row.get('COMPRESSION_OK',False))}` "
+                f"EL=`{bool(tip_row.get('ENTRY_LONG',False))}`\n"
+                f"HTF\_DIR=`{_htf_direction}` "
+                f"HTF\_Q=`{round(float(_htf_quality),3) if _htf_quality is not None else None}`\n"
+                f"lock=`{pm._reentry_lock.get(symbol)}` "
+                f"pos=`{symbol in pm.positions}`"
             )
 
         # ── feed each 5m bar to the position manager ──────────────
