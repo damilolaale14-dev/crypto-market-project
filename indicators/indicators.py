@@ -486,9 +486,13 @@ def compression_detector(df, er_window=20):
     # ------------------------------------------------------
     comp = df['IS_COMPRESSION'].astype(int)
 
-    df['COMPRESSION_BARS'] = (
-        comp.groupby((comp == 0).cumsum()).cumsum()
-    )
+    compression_bars = pd.Series(0, index=df.index)
+    for idx in range(1, len(df)):
+        if comp.iloc[idx] == 1:
+            compression_bars.iloc[idx] = compression_bars.iloc[idx - 1] + 1
+        else:
+            compression_bars.iloc[idx] = 0
+    df['COMPRESSION_BARS'] = compression_bars
 
     return df
 
