@@ -226,7 +226,7 @@ def fast_replay_symbol(symbol: str, from_ts=None, to_ts=None, notify_trades=True
         _has_nonzero_5m  = (lltf["final_signal"] != 0).any()
         _in_last_12      = i >= len(df_1h_active) - 12
 
-                if _has_nonzero_tip or _has_nonzero_5m or _in_last_12:
+        if _has_nonzero_tip or _has_nonzero_5m or _in_last_12:
             tip_row = df_signals.iloc[-1]
             _htf_direction = tip_row.get("HTF_DIRECTION", None)
             _htf_quality   = tip_row.get("HTF_QUALITY",   None)
