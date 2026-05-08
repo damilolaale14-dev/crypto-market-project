@@ -56,53 +56,6 @@ def debug_env():
         "RUN_KEY_SET": bool(os.getenv("RUN_KEY")),
     }
 
-
-@app.route("/debug/data")
-def debug_data_health():
-    if request.args.get("key") != os.getenv("RUN_KEY", "local"):
-        abort(403)
-
-    from data_pipeline.updater import update_symbol
-
-    summary = {}
-
-    for symbol in SYMBOLS:
-
-        try:
-            path_ltf  = f"data/cache/{symbol}_1h.parquet"
-            path_htf  = f"data/cache/{symbol}_4h.parquet"
-            path_lltf = f"data/cache/{symbol}_5m.parquet"
-
-            def _read(path):
-                if not os.path.exists(path):
-                    return None
-                df = pd.read_parquet(path)
-                df.index = pd.to_datetime(df.index, utc=True)
-                return df
-
-            df      = _read(path_ltf)
-            htf_df  = _read(path_htf)
-            lltf_df = _read(path_lltf)
-
-            summary[symbol] = {
-                "ltf_candles":  len(df)      if df      is not None else "missing",
-                "htf_candles":  len(htf_df)  if htf_df  is not None else "missing",
-                "lltf_candles": len(lltf_df) if lltf_df is not None else "missing",
-                "ltf_first":  str(df.index[0])      if df      is not None else None,
-                "ltf_last":   str(df.index[-1])     if df      is not None else None,
-                "htf_first":  str(htf_df.index[0])  if htf_df  is not None else None,
-                "htf_last":   str(htf_df.index[-1]) if htf_df  is not None else None,
-                "lltf_first": str(lltf_df.index[0]) if lltf_df is not None else None,
-                "lltf_last":  str(lltf_df.index[-1])if lltf_df is not None else None,
-            }
-
-        except Exception as e:
-
-            summary[symbol] = {"error": str(e)}
-
-    return summary, 200
-
-
 @app.route("/debug/signals")
 def debug_signals():
 
