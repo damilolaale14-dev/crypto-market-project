@@ -404,8 +404,16 @@ def run_hourly_for_symbol(
         if not replay and replay_cursor is None:
             if not new_bars.empty:
                 current_1h_open = pd.Timestamp(datetime.now(timezone.utc)).floor("h")
-                safe_bars = new_bars[new_bars.index < current_1h_open]
-                last_clean_ts = safe_bars.index[-1] if not safe_bars.empty else None
+                has_open_position = symbol in pm.positions
+
+                if has_open_position:
+                    # advance cursor fully — _bar_history handles exit continuity
+                    # not advancing was causing bars to reprocess every cron fire
+                    last_clean_ts = new_bars.index[-1]
+                else:
+                    # no open position — hold back current 1H window for signal detection
+                    safe_bars = new_bars[new_bars.index < current_1h_open]
+                    last_clean_ts = safe_bars.index[-1] if not safe_bars.empty else None
 
                 if last_clean_ts is not None:
                     with open(last_5m_file + ".tmp", "w") as f:

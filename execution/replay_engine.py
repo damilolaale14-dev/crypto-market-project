@@ -315,6 +315,14 @@ def fast_replay_symbol(symbol: str, from_ts=None, to_ts=None, notify_trades=True
         )
         trade_closes += 1
 
+    # Write live cursor so the hourly runner doesn't trigger reset recovery
+    os.makedirs("data/cursors", exist_ok=True)
+    last_5m_ts = df_5m_full.index[-1]
+    cursor_path = f"data/cursors/live_{symbol}.json"
+    with open(cursor_path + ".tmp", "w") as f:
+        json.dump(last_5m_ts.isoformat(), f)
+    os.replace(cursor_path + ".tmp", cursor_path)
+
     notifier.send_text(
         f"✅ *REPLAY COMPLETE*\n"
         f"Symbol: `{symbol}`\n"
