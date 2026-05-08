@@ -269,7 +269,9 @@ def run_hourly_for_symbol(
         lltf_df = lltf_df[lltf_df.index >= df.index[0]].copy()
         lltf_df = map_ltf_to_htf(lltf_df, df)
 
-        lltf_df["final_signal"] = df["final_signal"].reindex(
+        df["final_signal_shifted"] = df["final_signal"].shift(1)
+
+        lltf_df["final_signal"] = df["final_signal_shifted"].reindex(
             lltf_df.index,
             method="ffill"
         )
