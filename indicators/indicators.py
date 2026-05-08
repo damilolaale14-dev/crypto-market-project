@@ -1602,7 +1602,7 @@ def generate_signal(df, htf_df, atr_mult=1.5):
     df.loc[SHORT_CONDITION, 'signal'] = -1
     # df['signal'] = -1
 
-    df['final_signal'] = df['signal']
+    df['final_signal'] = df['signal'].shift(1).fillna(0).astype(int)
 
     # =========================
     # DIAGNOSTICS

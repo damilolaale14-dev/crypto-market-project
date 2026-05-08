@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, LINK
 # ==========================================================
 
-SYMBOL = "DOGEUSDT"
+SYMBOL = "FILUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -97,9 +97,9 @@ LEVERAGE = 1
 # LTF_LIMIT = 26280   # ~30 days of 1h candles
 # HTF_LIMIT = 6570   # ~120 days of 4h candles
 
-LLTF_LIMIT = 210240
-LTF_LIMIT = 17520   # ~30 days of 1h candles
-HTF_LIMIT = 4380   # ~120 days of 4h candles
+# LLTF_LIMIT = 210240
+# LTF_LIMIT = 17520   # ~30 days of 1h candles
+# HTF_LIMIT = 4380   # ~120 days of 4h candles
 
 # LTF_LIMIT = 8760   # ~30 days of 1h candles
 # HTF_LIMIT = 2190   # ~120 days of 4h candles
@@ -112,9 +112,9 @@ HTF_LIMIT = 4380   # ~120 days of 4h candles
 # LTF_LIMIT = 2000   # ~30 days of 1h candles
 # HTF_LIMIT = 500   # ~120 days of 4h candles
 
-# LLTF_LIMIT = 12000
-# LTF_LIMIT = 1000   # ~30 days of 1h candles
-# HTF_LIMIT = 250   # ~120 days of 4h candles
+LLTF_LIMIT = 12000
+LTF_LIMIT = 1000   # ~30 days of 1h candles
+HTF_LIMIT = 250   # ~120 days of 4h candles
 
 # LLTF_LIMIT = 6000
 # LTF_LIMIT = 500   # ~30 days of 1h candles
@@ -147,7 +147,6 @@ htf_df.index = pd.to_datetime(htf_df.index, utc=True)
 # ==========================================================
 
 ltf_df = generate_signal(ltf_df, htf_df)
-ltf_df['final_signal'] = ltf_df['signal'].shift(1)
 
 # ==========================================================
 # BACKTEST

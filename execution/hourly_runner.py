@@ -196,27 +196,6 @@ def run_hourly_for_symbol(
                             f"[FAST GATE BYPASS] {symbol} — cursor current but "
                             f"position open, proceeding for exit checks"
                         )
-                        # Rewind cursor to entry ONLY if cursor has moved ahead of entry —
-                        # prevents reprocessing 100+ bars on every cron fire for long-running trades
-                        try:
-                            pm_rewind = PositionManager(persist=True, notify=False)
-                            if symbol in pm_rewind.positions:
-                                entry_ts = pd.Timestamp(pm_rewind.positions[symbol]["entry_5m_ts"])
-                                if entry_ts.tzinfo is None:
-                                    entry_ts = entry_ts.tz_localize("UTC")
-                                rewind_target = entry_ts - pd.Timedelta(minutes=5)
-                                # only rewind if cursor is ahead of where we need to start
-                                if last_seen_ts > rewind_target:
-                                    last_seen_ts = rewind_target
-                                    cursor_file_rewind = _last_5m_file(symbol, True)
-                                    with open(cursor_file_rewind + ".tmp", "w") as _f:
-                                        json.dump(last_seen_ts.isoformat(), _f)
-                                    os.replace(cursor_file_rewind + ".tmp", cursor_file_rewind)
-                                    print(f"[CURSOR REWIND] {symbol} — rewound to {last_seen_ts}")
-                                else:
-                                    print(f"[CURSOR REWIND SKIPPED] {symbol} — cursor {last_seen_ts} already behind entry, no rewind needed")
-                        except Exception as _rewind_err:
-                            print(f"[CURSOR REWIND FAILED] {symbol} — {_rewind_err}")
                 else:
                     print(
                         f"[FAST GATE PASS] {symbol} — cursor {last_seen_ts} < "
@@ -272,7 +251,7 @@ def run_hourly_for_symbol(
                         _tg_debug(f"[WARMUP SKIP] {symbol} forced_time={forced_time} — insufficient data (1h={len(df)} 4h={len(htf_df)} 5m={len(lltf_df)})")
                         return None, replay_cursor
                 else:
-                    df, htf_df, lltf_df = df.iloc[:-1], htf_df.iloc[:-1], lltf_df.iloc[:-1]
+                    pass
 
         except Exception as fetch_err:
             notifier.send_text(

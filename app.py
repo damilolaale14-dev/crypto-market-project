@@ -331,6 +331,112 @@ def debug_positions():
     with open(path, "r") as f:
         return {"exists": True, "positions": json.load(f)}
 
+@app.route("/debug/state")
+def debug_full_state():
+    if request.args.get("key") != os.getenv("RUN_KEY", "local"):
+        abort(403)
+
+    import pandas as pd
+    from datetime import datetime, timezone
+
+    result = {}
+
+    # ── POSITIONS ──────────────────────────────────────────
+    positions_path = "data/positions/open_positions.json"
+    if os.path.exists(positions_path):
+        with open(positions_path, "r") as f:
+            result["open_positions"] = json.load(f)
+    else:
+        result["open_positions"] = {}
+
+    # ── BAR HISTORY ────────────────────────────────────────
+    bar_history_path = "data/positions/bar_history.json"
+    if os.path.exists(bar_history_path):
+        with open(bar_history_path, "r") as f:
+            raw = json.load(f)
+        result["bar_history"] = {
+            sym: {"bar_count": len(bars), "latest_bar": bars[-1] if bars else None}
+            for sym, bars in raw.items()
+        }
+    else:
+        result["bar_history"] = {}
+
+    # ── EXECUTED SIGNALS ───────────────────────────────────
+    executed_path = "data/positions/executed_signals.json"
+    if os.path.exists(executed_path):
+        with open(executed_path, "r") as f:
+            signals = json.load(f)
+        result["executed_signals"] = {
+            "count": len(signals),
+            "entries": signals
+        }
+    else:
+        result["executed_signals"] = {"count": 0, "entries": []}
+
+    # ── REENTRY LOCK ───────────────────────────────────────
+    reentry_path = "data/positions/reentry_lock.json"
+    if os.path.exists(reentry_path):
+        with open(reentry_path, "r") as f:
+            result["reentry_lock"] = json.load(f)
+    else:
+        result["reentry_lock"] = {}
+
+    # ── CURSORS ────────────────────────────────────────────
+    cursors = {}
+    cursor_dir = "data/cursors"
+    if os.path.exists(cursor_dir):
+        for fname in sorted(os.listdir(cursor_dir)):
+            fpath = os.path.join(cursor_dir, fname)
+            try:
+                with open(fpath, "r") as f:
+                    cursors[fname] = json.load(f)
+            except Exception as e:
+                cursors[fname] = {"error": str(e)}
+    result["cursors"] = cursors
+
+    # ── HOUR MEMORY ────────────────────────────────────────
+    hour_memory_path = "data/last_hour_seen.json"
+    if os.path.exists(hour_memory_path):
+        with open(hour_memory_path, "r") as f:
+            result["last_hour_seen"] = json.load(f)
+    else:
+        result["last_hour_seen"] = {}
+
+    # ── LAST RUN ───────────────────────────────────────────
+    last_run_path = "data/last_run.json"
+    if os.path.exists(last_run_path):
+        with open(last_run_path, "r") as f:
+            result["last_run"] = json.load(f)
+    else:
+        result["last_run"] = {}
+
+    # ── REPLAY LOCK ────────────────────────────────────────
+    result["replay_lock_active"] = os.path.exists("data/replay_lock.json")
+
+    # ── CACHE SUMMARY ──────────────────────────────────────
+    cache_summary = {}
+    cache_dir = "data/cache"
+    if os.path.exists(cache_dir):
+        for fname in sorted(os.listdir(cache_dir)):
+            if not fname.endswith(".parquet"):
+                continue
+            fpath = os.path.join(cache_dir, fname)
+            try:
+                df = pd.read_parquet(fpath, columns=["close"])
+                df.index = pd.to_datetime(df.index, utc=True)
+                cache_summary[fname] = {
+                    "bars": len(df),
+                    "first": str(df.index[0]),
+                    "last": str(df.index[-1]),
+                }
+            except Exception as e:
+                cache_summary[fname] = {"error": str(e)}
+    result["cache_summary"] = cache_summary
+
+    # ── SERVER TIME ────────────────────────────────────────
+    result["server_time_utc"] = datetime.now(timezone.utc).isoformat()
+
+    return result, 200
 
 # ==================================================
 # ENTRYPOINT
