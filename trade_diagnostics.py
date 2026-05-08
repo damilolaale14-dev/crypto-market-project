@@ -27,6 +27,11 @@ def diagnose_trades(trades_df: pd.DataFrame) -> pd.DataFrame:
     df["side"] = df["side"].astype(int)
     df["direction"] = df["side"].map({1: "LONG", -1: "SHORT"})
 
+    WAT = pd.Timedelta(hours=1)
+    for col in ["entry_time", "exit_time"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], utc=True) + WAT
+
     # Fixed risk assumption
     FIXED_RISK = 10.0
     if "risk_per_trade" in df.columns:

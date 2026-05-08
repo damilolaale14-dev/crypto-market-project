@@ -1407,6 +1407,13 @@ def generate_signal(df, htf_df, atr_mult=1.5):
     if df.empty:
         return df
 
+    now_hour = pd.Timestamp.now(tz="UTC").floor("h")
+    df     = df[df.index < now_hour].copy()
+    htf_df = htf_df[htf_df.index < now_hour].copy()
+
+    if df.empty or htf_df.empty:
+        return df
+
     # =========================
     # Core processing
     # =========================

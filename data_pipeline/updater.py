@@ -337,8 +337,4 @@ def update_symbol(symbol: str):
 
     print("[SAVE] LLTF cache updated | candles:", len(df_lltf))
 
-    # strip forming candle before returning so generate_signal never sees partial 1H/4H data
-    df     = df[df.index < now_hour]
-    df_htf = df_htf[df_htf.index < now_hour]
-
     return df, df_htf, df_lltf
