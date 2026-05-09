@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, LINK
 # ==========================================================
 
-SYMBOL = "ETCUSDT"
+SYMBOL = "FILUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -175,3 +175,28 @@ print("HTF candles (4h):", len(htf_df))
 # ==========================================================
 
 diagnostics_df = diagnose_trades(trade_log)
+
+# # ── 5m candle dump per trade ────────────────────────────────
+# print("\n=== 5M CANDLES PER TRADE ===")
+# for _, t in trade_log.iterrows():
+#     entry_time = backtester.lltf_df.index[int(t["entry_idx"])]
+#     exit_time  = backtester.lltf_df.index[int(t["exit_idx"])]
+#     window     = backtester.lltf_df.loc[entry_time:exit_time].copy()
+#     R          = abs(t["entry_price"] - t["stop_loss"])
+#     print(f"\n{'='*60}")
+#     print(f"{t['direction']} | entry={t['entry_price']:.4f} stop={t['stop_loss']:.4f} R={R:.4f}")
+#     print(f"{'time':>8} {'open':>8} {'high':>8} {'low':>8} {'close':>8} {'vol':>12} {'body/atr':>9} {'stop_r':>7} {'pnl_r':>7}")
+#     for ts, row in window.iterrows():
+#         body    = abs(row["close"] - row["open"])
+#         atr_5m  = row.get("ATR_5M", float("nan"))
+#         if pd.isna(atr_5m) or atr_5m <= 0:
+#             atr_5m = row.get("ATR", float("nan")) * 0.20
+#         body_atr = body / atr_5m if atr_5m and not pd.isna(atr_5m) and atr_5m > 0 else float("nan")
+#         if t["side"] == 1:
+#             stop_r = (row["close"] - t["stop_loss"]) / R if R > 0 else float("nan")
+#             pnl_r  = (row["close"] - t["entry_price"]) / R if R > 0 else float("nan")
+#         else:
+#             stop_r = (t["stop_loss"] - row["close"]) / R if R > 0 else float("nan")
+#             pnl_r  = (t["entry_price"] - row["close"]) / R if R > 0 else float("nan")
+#         wat_ts = (ts + pd.Timedelta(hours=1)).strftime("%H:%M")
+#         print(f"{wat_ts:>8} {row['open']:>8.4f} {row['high']:>8.4f} {row['low']:>8.4f} {row['close']:>8.4f} {row['volume']:>12.2f} {body_atr:>9.2f} {stop_r:>7.2f} {pnl_r:>7.2f}")
