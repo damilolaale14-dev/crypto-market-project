@@ -302,13 +302,6 @@ def run_hourly_for_symbol(
             method="ffill"
         )
 
-        notifier.debug(
-            f"[SIGNAL GEN] {symbol}\n"
-            f"df_last={df.index[-1]}\n"
-            f"non_zero_signals={(lltf_frozen['final_signal'] != 0).sum()}\n"
-            f"last_11={lltf_frozen['final_signal'].iloc[-11:].tolist()}"
-        )
-
         # notifier.debug(
         #     f"[SIGNAL MAP] {symbol}\n"
         #     f"lltf_len={len(lltf_df)}\n"
@@ -324,6 +317,13 @@ def run_hourly_for_symbol(
         lltf_frozen = lltf_df.copy()
         lltf_frozen = lltf_frozen.dropna(subset=['ltf_index'])
         lltf_frozen['ltf_index'] = lltf_frozen['ltf_index'].astype(int)
+
+        notifier.debug(
+            f"[SIGNAL GEN] {symbol}\n"
+            f"df_last={df.index[-1]}\n"
+            f"non_zero_signals={(lltf_frozen['final_signal'] != 0).sum()}\n"
+            f"last_11={lltf_frozen['final_signal'].iloc[-11:].tolist()}"
+        )
 
         # notifier.debug(
         #     f"[FROZEN] {symbol}\n"
