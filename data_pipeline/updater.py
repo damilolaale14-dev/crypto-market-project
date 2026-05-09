@@ -104,8 +104,8 @@ def update_symbol(symbol: str):
                 # check if 1H cache has the latest closed candle
                 ltf_check = pd.read_parquet(path_ltf)
                 ltf_check.index = pd.to_datetime(ltf_check.index, utc=True)
-                if ltf_check.index[-1] < now_hour:
-                    print(f"[SKIP BYPASSED] {symbol} — 1H cache behind ({ltf_check.index[-1]} < {now_hour}), fetching")
+                if ltf_check.index[-1] < now_hour - timedelta(hours=1):
+                    print(f"[SKIP BYPASSED] {symbol} — 1H cache behind ({ltf_check.index[-1]} < {now_hour - timedelta(hours=1)}), fetching")
                     raise Exception("1H cache stale — force full fetch")
 
                 # also check 5m cache isn't stale by more than 2 bars
@@ -120,8 +120,8 @@ def update_symbol(symbol: str):
                 df      = ltf_check
                 df_htf  = pd.read_parquet(path_htf)
                 df_htf.index  = pd.to_datetime(df_htf.index,  utc=True)
-                df     = df[df.index <= now_hour]
-                df_htf = df_htf[df_htf.index <= now_hour]
+                df     = df[df.index <= now_hour - timedelta(hours=1)]
+                df_htf = df_htf[df_htf.index <= now_hour - timedelta(hours=1)]
                 return df, df_htf, df_lltf
         except Exception as e:
             print(f"[SKIP CHECK FAILED] {symbol} — {e}, proceeding with full fetch")
