@@ -1611,7 +1611,12 @@ def generate_signal(df, htf_df, atr_mult=1.5):
     # df['signal'] = -1
 
     df['final_signal'] = df['signal'].shift(1).fillna(0).astype(int)
+    df['signal_live'] = df['signal'].fillna(0).astype(int)
     df = df[df.index <= last_closed_1h].copy()
+
+    # =========================
+    # DIAGNOSTICS
+    # =========================
 
     # =========================
     # DIAGNOSTICS
