@@ -273,13 +273,13 @@ def run_hourly_for_symbol(
         lltf_last_before = lltf_df.index[-1]
         lltf_df = lltf_df[lltf_df.index < current_5m_boundary].copy()
 
-        notifier.debug(
-            f"[CANDLE GUARD] {symbol}\n"
-            f"5m_boundary={current_5m_boundary}\n"
-            f"lltf_last_before={lltf_last_before}\n"
-            f"lltf_last_after={lltf_df.index[-1] if not lltf_df.empty else 'EMPTY'}\n"
-            f"incomplete_bar_removed={lltf_last_before >= current_5m_boundary}"
-        )
+        # notifier.debug(
+        #     f"[CANDLE GUARD] {symbol}\n"
+        #     f"5m_boundary={current_5m_boundary}\n"
+        #     f"lltf_last_before={lltf_last_before}\n"
+        #     f"lltf_last_after={lltf_df.index[-1] if not lltf_df.empty else 'EMPTY'}\n"
+        #     f"incomplete_bar_removed={lltf_last_before >= current_5m_boundary}"
+        # )
 
         if lltf_df.empty:
             notifier.debug(f"[CANDLE GUARD EMPTY] {symbol} — lltf_df empty after clip, skipping")
@@ -294,12 +294,12 @@ def run_hourly_for_symbol(
             notifier.debug(f"[SIGNAL GUARD] {symbol} — no final_signal or df too short")
             return None, replay_cursor
 
-        notifier.debug(
-            f"[SIGNAL GEN] {symbol}\n"
-            f"df_last={df.index[-1]}\n"
-            f"non_zero_signals={(df['final_signal'] != 0).sum()}\n"
-            f"last_8={df['final_signal'].iloc[-8:].tolist()}"
-        )
+        # notifier.debug(
+        #     f"[SIGNAL GEN] {symbol}\n"
+        #     f"df_last={df.index[-1]}\n"
+        #     f"non_zero_signals={(df['final_signal'] != 0).sum()}\n"
+        #     f"last_8={df['final_signal'].iloc[-8:].tolist()}"
+        # )
 
         lltf_df = lltf_df[lltf_df.index >= df.index[0]].copy()
         lltf_df = map_ltf_to_htf(lltf_df, df)
@@ -309,13 +309,13 @@ def run_hourly_for_symbol(
             method="ffill"
         )
 
-        notifier.debug(
-            f"[SIGNAL MAP] {symbol}\n"
-            f"lltf_len={len(lltf_df)}\n"
-            f"lltf_last={lltf_df.index[-1]}\n"
-            f"non_zero_5m={(lltf_df['final_signal'] != 0).sum()}\n"
-            f"value_counts={lltf_df['final_signal'].value_counts().to_dict()}"
-        )
+        # notifier.debug(
+        #     f"[SIGNAL MAP] {symbol}\n"
+        #     f"lltf_len={len(lltf_df)}\n"
+        #     f"lltf_last={lltf_df.index[-1]}\n"
+        #     f"non_zero_5m={(lltf_df['final_signal'] != 0).sum()}\n"
+        #     f"value_counts={lltf_df['final_signal'].value_counts().to_dict()}"
+        # )
 
         # Use 1H ATR to match backtest — forward fill onto 5m bars
         lltf_df['ATR'] = df['ATR'].reindex(lltf_df.index, method='ffill')
@@ -325,12 +325,12 @@ def run_hourly_for_symbol(
         lltf_frozen = lltf_frozen.dropna(subset=['ltf_index'])
         lltf_frozen['ltf_index'] = lltf_frozen['ltf_index'].astype(int)
 
-        notifier.debug(
-            f"[FROZEN] {symbol}\n"
-            f"bars_after_dropna={len(lltf_frozen)}\n"
-            f"frozen_last={lltf_frozen.index[-1] if not lltf_frozen.empty else 'EMPTY'}\n"
-            f"non_zero_frozen={(lltf_frozen['final_signal'] != 0).sum()}"
-        )
+        # notifier.debug(
+        #     f"[FROZEN] {symbol}\n"
+        #     f"bars_after_dropna={len(lltf_frozen)}\n"
+        #     f"frozen_last={lltf_frozen.index[-1] if not lltf_frozen.empty else 'EMPTY'}\n"
+        #     f"non_zero_frozen={(lltf_frozen['final_signal'] != 0).sum()}"
+        # )
 
         # ==========================================================
         # NEW 1H CANDLE DETECTION
@@ -376,15 +376,15 @@ def run_hourly_for_symbol(
             else lltf_frozen[lltf_frozen.index > last_seen]
         )
 
-        notifier.debug(
-            f"[NEW BARS] {symbol}\n"
-            f"new_bars={len(new_bars)}\n"
-            f"last_seen={last_seen}\n"
-            f"latest_ts={latest_ts}\n"
-            f"new_bars_first={new_bars.index[0] if not new_bars.empty else 'EMPTY'}\n"
-            f"new_bars_last={new_bars.index[-1] if not new_bars.empty else 'EMPTY'}\n"
-            f"non_zero_in_new_bars={(new_bars['final_signal'] != 0).sum() if not new_bars.empty else 0}"
-        )
+        # notifier.debug(
+        #     f"[NEW BARS] {symbol}\n"
+        #     f"new_bars={len(new_bars)}\n"
+        #     f"last_seen={last_seen}\n"
+        #     f"latest_ts={latest_ts}\n"
+        #     f"new_bars_first={new_bars.index[0] if not new_bars.empty else 'EMPTY'}\n"
+        #     f"new_bars_last={new_bars.index[-1] if not new_bars.empty else 'EMPTY'}\n"
+        #     f"non_zero_in_new_bars={(new_bars['final_signal'] != 0).sum() if not new_bars.empty else 0}"
+        # )
 
         if new_bars.empty:
             notifier.debug(

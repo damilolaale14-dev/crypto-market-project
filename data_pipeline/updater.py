@@ -117,10 +117,10 @@ def update_symbol(symbol: str):
 
                 df_lltf = pd.read_parquet(path_lltf)
                 df_lltf.index = pd.to_datetime(df_lltf.index, utc=True)
-                df      = ltf_check
+                df = ltf_check
                 df_htf  = pd.read_parquet(path_htf)
                 df_htf.index  = pd.to_datetime(df_htf.index,  utc=True)
-                df     = df[df.index <= now_hour - timedelta(hours=1)]
+                df = df[df.index <= now_hour - timedelta(hours=1)]
                 df_htf = df_htf[df_htf.index <= now_hour - timedelta(hours=1)]
                 return df, df_htf, df_lltf
         except Exception as e:
@@ -153,7 +153,7 @@ def update_symbol(symbol: str):
     # --------------------------------------------------
 
     fetch_start = start_required if df is None else last_ts + timedelta(hours=1)
-    fetch_end = now_hour  # 1H candles: only fetch closed candles
+    fetch_end = now_hour + timedelta(hours=1)
 
     print("[FETCH WINDOW]")
     print("start:", fetch_start)
@@ -233,7 +233,7 @@ def update_symbol(symbol: str):
 
     # Determine fetch window
     htf_fetch_start = start_required if df_htf is None else last_htf_ts + timedelta(hours=4)
-    htf_fetch_end = now_hour  # 4H candles: only fetch closed candles
+    htf_fetch_end = now_hour + timedelta(hours=4)
 
     print("[FETCH HTF WINDOW]")
     print("start:", htf_fetch_start)
