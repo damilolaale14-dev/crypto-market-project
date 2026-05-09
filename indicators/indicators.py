@@ -1408,7 +1408,8 @@ def generate_signal(df, htf_df, atr_mult=1.5):
         return df
 
     now_hour = pd.Timestamp.now(tz="UTC").floor("h")
-    df     = df[df.index < now_hour].copy()
+    last_closed_1h = now_hour - pd.Timedelta(hours=1)
+    df = df[df.index <= last_closed_1h].copy()
     htf_df = htf_df[htf_df.index < now_hour].copy()
 
     if df.empty or htf_df.empty:
