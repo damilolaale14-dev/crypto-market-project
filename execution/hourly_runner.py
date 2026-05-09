@@ -294,12 +294,12 @@ def run_hourly_for_symbol(
             notifier.debug(f"[SIGNAL GUARD] {symbol} — no final_signal or df too short")
             return None, replay_cursor
 
-        # notifier.debug(
-        #     f"[SIGNAL GEN] {symbol}\n"
-        #     f"df_last={df.index[-1]}\n"
-        #     f"non_zero_signals={(df['final_signal'] != 0).sum()}\n"
-        #     f"last_8={df['final_signal'].iloc[-8:].tolist()}"
-        # )
+        notifier.debug(
+            f"[SIGNAL GEN] {symbol}\n"
+            f"df_last={df.index[-1]}\n"
+            f"non_zero_signals={(df['final_signal'] != 0).sum()}\n"
+            f"last_8={df['final_signal'].iloc[-8:].tolist()}"
+        )
 
         lltf_df = lltf_df[lltf_df.index >= df.index[0]].copy()
         lltf_df = map_ltf_to_htf(lltf_df, df)
