@@ -53,7 +53,7 @@ class PositionManager:
     USE_ACCOUNT_GATES = False
 
     SIGNAL_EXPIRY_BARS      = 6    # replay: signal dies after 6×5m = 30 minutes
-    SIGNAL_EXPIRY_BARS_LIVE = 2   # live: allow up to 55 minutes for scheduler jitter
+    SIGNAL_EXPIRY_BARS_LIVE = 12  # live: 60 minutes from when entry becomes valid
 
     def __init__(self, persist=True, notify=True):
         self.persist  = persist
@@ -275,22 +275,13 @@ class PositionManager:
         # SIGNAL EXPIRY CHECK
         # ===================================================
         if signal != 0 and not position:
+            # expiry measured from the execution bar itself (external_row.name)
+            # which is the 1H bar that carries final_signal after shift(1)
             signal_age_bars = len(
-                lltf_df[(lltf_df.index > external_row.name) & (lltf_df.index <= current_ts)]
+                lltf_df[(lltf_df.index >= external_row.name) & (lltf_df.index <= current_ts)]
             )
-            # Use wider expiry window — replay uses strict 6-bar window,
-            # but live needs buffer for scheduler jitter and late cron fires
-            # self._is_live is set in __init__ based on persist flag as a proxy
             expiry_limit = self.SIGNAL_EXPIRY_BARS_LIVE if self._is_live else self.SIGNAL_EXPIRY_BARS
-            # _tg_debug(f"[EXPIRY CHECK] {symbol} ts={current_ts} signal_age={signal_age_bars} limit={expiry_limit} signal={signal}")
             if signal_age_bars > expiry_limit:
-                # _tg_debug(
-                #     f"[SIGNAL EXPIRED] {symbol}\n"
-                #     f"age={signal_age_bars} bars > limit={expiry_limit}\n"
-                #     f"external_row.name={external_row.name}\n"
-                #     f"current_ts={current_ts}\n"
-                #     f"signal KILLED"
-                # )
                 signal = 0
             
         # =====================================================

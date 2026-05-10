@@ -1408,8 +1408,6 @@ def generate_signal(df, htf_df, atr_mult=1.5):
         return df
 
     now_hour = pd.Timestamp.now(tz="UTC").floor("h")
-    last_closed_1h = now_hour - pd.Timedelta(hours=1)
-    df = df[df.index <= last_closed_1h].copy()
     htf_df = htf_df[htf_df.index < now_hour].copy()
 
     if df.empty or htf_df.empty:
@@ -1611,7 +1609,6 @@ def generate_signal(df, htf_df, atr_mult=1.5):
     # df['signal'] = -1
 
     df['final_signal'] = df['signal'].shift(1).fillna(0).astype(int)
-    df['signal_live'] = df['signal'].fillna(0).astype(int)
 
     # =========================
     # DIAGNOSTICS

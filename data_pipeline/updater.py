@@ -153,7 +153,7 @@ def update_symbol(symbol: str):
     # --------------------------------------------------
 
     fetch_start = start_required if df is None else last_ts + timedelta(hours=1)
-    fetch_end = now_hour + timedelta(hours=1)
+    fetch_end = now_hour - timedelta(hours=1)  # only fetch closed 1H bars
 
     print("[FETCH WINDOW]")
     print("start:", fetch_start)
@@ -182,6 +182,7 @@ def update_symbol(symbol: str):
 
     df = df.sort_index()
     df = df[df.index >= start_required]
+    df = df[df.index <= now_hour - timedelta(hours=1)]  # only closed bars before gap check and save
     df = df.iloc[-HOURS_LOOKBACK:]
 
     print("[DATA] final LTF candles:", len(df))
