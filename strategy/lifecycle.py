@@ -275,10 +275,11 @@ class PositionManager:
         # SIGNAL EXPIRY CHECK
         # ===================================================
         if signal != 0 and not position:
-            # expiry measured from the execution bar itself (external_row.name)
-            # which is the 1H bar that carries final_signal after shift(1)
+            # expiry measured from the first 5m bar AFTER the signal 1H bar closes
+            # signal_bar_end = signal 1H bar open + 1 hour = first valid execution bar
+            signal_bar_end = external_row.name + pd.Timedelta(hours=1)
             signal_age_bars = len(
-                lltf_df[(lltf_df.index >= external_row.name) & (lltf_df.index <= current_ts)]
+                lltf_df[(lltf_df.index >= signal_bar_end) & (lltf_df.index <= current_ts)]
             )
             expiry_limit = self.SIGNAL_EXPIRY_BARS_LIVE if self._is_live else self.SIGNAL_EXPIRY_BARS
             if signal_age_bars > expiry_limit:

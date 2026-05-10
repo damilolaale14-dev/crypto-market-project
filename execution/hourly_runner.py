@@ -302,6 +302,13 @@ def run_hourly_for_symbol(
             method="ffill"
         )
 
+        # zero out signal on 5m bars that fall within the signal bar's own 1H window
+        # entry is only valid AFTER the signal 1H bar has fully closed
+        signal_bar_ts = df.index[-1]
+        signal_bar_end = signal_bar_ts + pd.Timedelta(hours=1)
+        within_signal_bar = (lltf_df.index >= signal_bar_ts) & (lltf_df.index < signal_bar_end)
+        lltf_df.loc[within_signal_bar, "final_signal"] = 0
+
         # notifier.debug(
         #     f"[SIGNAL GEN] {symbol}\n"
         #     f"df_last={df.index[-1]}\n"
