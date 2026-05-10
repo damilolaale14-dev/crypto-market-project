@@ -288,7 +288,7 @@ def run_hourly_for_symbol(
         # -------------------
         # GENERATE & MAP SIGNALS
         # -------------------
-        df = generate_signal(df.copy(), htf_df.copy())
+        df = generate_signal(df.copy(), htf_df.copy(), live=is_live)
 
         if 'final_signal' not in df.columns or len(df) < 2:
             notifier.debug(f"[SIGNAL GUARD] {symbol} — no final_signal or df too short")

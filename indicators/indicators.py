@@ -1403,7 +1403,7 @@ def atr_acceleration(df, fast=5, slow=20):
 # ==========================================================
 # INTEGRATE INTO SIGNAL GENERATION
 # ==========================================================
-def generate_signal(df, htf_df, atr_mult=1.5):
+def generate_signal(df, htf_df, atr_mult=1.5, live=False):
     if df.empty:
         return df
 
@@ -1608,7 +1608,10 @@ def generate_signal(df, htf_df, atr_mult=1.5):
     df.loc[SHORT_CONDITION, 'signal'] = -1
     # df['signal'] = -1
 
-    df['final_signal'] = df['signal'].shift(1).fillna(0).astype(int)
+    if live:
+        df['final_signal'] = df['signal'].fillna(0).astype(int)
+    else:
+        df['final_signal'] = df['signal'].shift(1).fillna(0).astype(int)
 
     # =========================
     # DIAGNOSTICS
