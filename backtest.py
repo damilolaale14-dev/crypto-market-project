@@ -222,22 +222,46 @@ class SignalBacktester:
             return False
         return mfe_r < self.NO_FOLLOW_MFE
     
+    # Mirrors lifecycle.py _update_dynamic_stop exactly
+    ATR_AFTER_HALF_R = 2.0   # before 2R MFE
+    ATR_AFTER_ONE_R  = 1.5   # after 2R MFE secured
+
     def update_dynamic_stop(self, trade, current_price, atr):
-        r_multiple = trade['pnl_r']
+        mfe_r = trade.get('mfe_r', 0.0)
 
-        # tighten after 0.5R
-        if r_multiple > 0.5:
-            if trade['side'] == 1:
-                trade['stop_loss'] = max(trade['stop_loss'], current_price - atr * self.ATR_AFTER_HALF_R)
-            else:
-                trade['stop_loss'] = min(trade['stop_loss'], current_price + atr * self.ATR_AFTER_HALF_R)
+        if mfe_r <= 0.5:
+            return
 
-        # breakeven after 1R
-        if r_multiple > 1.0:
-            if trade['side'] == 1:
-                trade['stop_loss'] = max(trade['stop_loss'], trade['entry_price'])
-            else:
-                trade['stop_loss'] = min(trade['stop_loss'], trade['entry_price'])
+        bars = trade.get('bars_in_trade', 0)
+        last_trail_bar = trade.get('last_trail_bar', 0)
+        if bars - last_trail_bar < 3:
+            return
+        trade['last_trail_bar'] = bars
+
+        entry = trade['entry_price']
+        current_stop = trade['stop_loss']
+        side = trade['side']
+
+        atr_mult = self.ATR_AFTER_ONE_R if mfe_r > 2.0 else self.ATR_AFTER_HALF_R
+
+        if side == 1:
+            trail_candidate = current_price - atr * atr_mult
+            if mfe_r > 2.0:
+                trail_candidate = max(trail_candidate, entry)
+            if trail_candidate <= entry:
+                return
+            new_stop = max(current_stop, trail_candidate)
+        else:
+            trail_candidate = current_price + atr * atr_mult
+            if mfe_r > 2.0:
+                trail_candidate = min(trail_candidate, entry)
+            if trail_candidate >= entry:
+                return
+            new_stop = min(current_stop, trail_candidate)
+
+        trade['stop_loss'] = new_stop
+        # keep self.stop_loss in sync so hard stop check uses updated value
+        self.stop_loss = new_stop
 
     # ------------------------
     # Position sizing
@@ -464,104 +488,94 @@ class SignalBacktester:
         if self.position == 0:
             return
 
-        # -------------------------------------------------
-        # 1️⃣ Update excursions (5m MFE/MAE tracking)
-        # -------------------------------------------------
-        if self.position == 1:
-            self.current_trade["MAE"] = min(self.current_trade["MAE"], (low  - self.entry_price) * self.units)
-            self.current_trade["MFE"] = max(self.current_trade["MFE"], (high - self.entry_price) * self.units)
-            current_price = high
-        else:
-            self.current_trade["MAE"] = min(self.current_trade["MAE"], (self.entry_price - high) * self.units)
-            self.current_trade["MFE"] = max(self.current_trade["MFE"], (self.entry_price - low)  * self.units)
-            current_price = low
-
-        R_multiple = self.current_trade["MFE"] / self.fixed_risk
-        bars_in_trade = idx - self.current_trade["entry_idx"]
-
-        # ==========================================================
-        # REAL TRADE LIFECYCLE ENGINE (5m)
-        # ==========================================================
-
         trade = self.current_trade
-        exec_df = self.lltf_df if hasattr(self, 'lltf_df') else self.df
+        side  = trade['side']
+
+        exec_df      = self.lltf_df if hasattr(self, 'lltf_df') else self.df
         current_time = exec_df.index[idx]
-        current_price = high if self.position == 1 else low
 
-        # R is the original risk in price terms
-        self.R = abs(trade["entry_price"] - trade["stop_loss"])
+        # Best price this bar (matches lifecycle.py convention)
+        current_price = high if side == 1 else low
 
-        # Get 5m window since entry
-        window_5m = self.get_5m_window(trade['entry_time'], current_time)
-        bars_5m = len(window_5m)
+        # ── MFE / MAE tracking (price terms, not dollar terms) ──
+        R = abs(trade["entry_price"] - trade["stop_loss"])
+        self.R = R
 
-        # Calculate pnl in R
-        if trade['side'] == 1:
-            pnl_r = (current_price - trade['entry_price']) / self.R
+        if side == 1:
+            move_high = high - trade["entry_price"]
+            move_low  = low  - trade["entry_price"]
         else:
-            pnl_r = (trade['entry_price'] - current_price) / self.R
+            move_high = trade["entry_price"] - low
+            move_low  = trade["entry_price"] - high
 
-        # store CURRENT R
-        trade['pnl_r'] = pnl_r
+        # MFE/MAE stored in price terms to match lifecycle.py
+        trade["MFE"] = max(trade.get("MFE", 0.0), move_high)
+        trade["MAE"] = min(trade.get("MAE", 0.0), move_low)
 
-        # store BEST R
-        trade['mfe_r'] = max(trade.get('mfe_r', -999), pnl_r)
-
-        # =============================
-        # STAGE 0 — INCUBATION (0–30m)
-        # =============================
-        if bars_5m <= self.INCUBATION_BARS:
-            if self.opposite_impulse_exit(window_5m, trade['side'], trade=self.current_trade):
-                self._exit(current_price, idx, "momentum_decay")
-                return
-
-        # =============================
-        # STAGE 1 — VALIDATION (30–90m)
-        # =============================
-        elif bars_5m <= self.VALIDATION_BARS:
-
-            if self.stop_pressure_exit(window_5m, trade['stop_loss'], trade['side']):
-                self._exit(current_price, idx, "stop_pressure")
-                return
-
-            if self.no_follow_through_exit(trade['mfe_r'], bars_5m):
-                self._exit(current_price, idx, "no_follow_through")
-                return
-
-        # =============================
-        # STAGE 2 — EXPANSION (>90m)
-        # =============================
+        # dollar excursions for diagnostics
+        if side == 1:
+            self.current_trade["MAE"] = min(
+                self.current_trade.get("MAE_usd", 0.0),
+                (low  - trade["entry_price"]) * self.units
+            )
+            self.current_trade["MFE"] = max(
+                self.current_trade.get("MFE_usd", 0.0),
+                (high - trade["entry_price"]) * self.units
+            )
         else:
-            atr = window_5m['high'].sub(window_5m['low']).rolling(14).mean().iloc[-1]
-            self.update_dynamic_stop(trade, current_price, atr)
+            self.current_trade["MAE"] = min(
+                self.current_trade.get("MAE_usd", 0.0),
+                (trade["entry_price"] - high) * self.units
+            )
+            self.current_trade["MFE"] = max(
+                self.current_trade.get("MFE_usd", 0.0),
+                (trade["entry_price"] - low) * self.units
+            )
 
-            if self.opposite_impulse_exit(window_5m, trade['side']):
-                self._exit(current_price, idx, "momentum_decay")
-                return
+        mfe_r = trade["MFE"] / R if R > 0 else 0.0
+        pnl_r = (
+            (current_price - trade["entry_price"]) / R if side == 1
+            else (trade["entry_price"] - current_price) / R
+        ) if R > 0 else 0.0
 
-        # =============================
-        # LIQUIDATION CHECK (leverage)
-        # must come before hard stop —
-        # liquidation can fire closer to
-        # entry than the SL at high leverage
-        # =============================
-        if self.leverage > 1 and hasattr(self, 'liquidation_price') and self.liquidation_price is not None:
-            if self.position == 1 and low <= self.liquidation_price:
+        trade["pnl_r"] = pnl_r
+        trade["mfe_r"] = mfe_r
+        trade["bars_in_trade"] = trade.get("bars_in_trade", 0) + 1
+
+        # ── 5m window for exit checks ──────────────────────────
+        window_5m = self.get_5m_window(trade["entry_time"], current_time)
+
+        # ── DYNAMIC TRAILING STOP (mirrors lifecycle.py) ───────
+        if "ATR_5M" in exec_df.columns:
+            atr = exec_df["ATR_5M"].iloc[max(0, idx-2):idx+1].mean()
+        else:
+            atr = exec_df["ATR"].iloc[max(0, idx-2):idx+1].mean() * 0.20
+        if pd.isna(atr) or atr <= 0:
+            atr = R * 0.20  # last resort fallback
+
+        self.update_dynamic_stop(trade, current_price, atr)
+
+        # ── OPPOSITE IMPULSE EXIT (matches lifecycle.py exactly) 
+        if self.opposite_impulse_exit(window_5m, side, trade=trade):
+            self._exit(current_price, idx, "opposite_impulse")
+            return
+
+        # ── LIQUIDATION (leverage only) ─────────────────────────
+        if (self.leverage > 1
+                and hasattr(self, 'liquidation_price')
+                and self.liquidation_price is not None):
+            if side == 1 and low <= self.liquidation_price:
                 self._exit(self.liquidation_price, idx, "liquidated")
                 return
-            elif self.position == -1 and high >= self.liquidation_price:
+            elif side == -1 and high >= self.liquidation_price:
                 self._exit(self.liquidation_price, idx, "liquidated")
                 return
 
-        # =============================
-        # HARD STOP ALWAYS LAST
-        # =============================
-        if self.position == 1:
-            if low <= self.stop_loss:
-                self._exit(self.stop_loss, idx, "stop_loss")
-        else:
-            if high >= self.stop_loss:
-                self._exit(self.stop_loss, idx, "stop_loss")
+        # ── HARD STOP — always last ─────────────────────────────
+        if side == 1 and low <= trade["stop_loss"]:
+            self._exit(trade["stop_loss"], idx, "stop_loss")
+        elif side == -1 and high >= trade["stop_loss"]:
+            self._exit(trade["stop_loss"], idx, "stop_loss")
 
     # ------------------------
     # Run backtest
