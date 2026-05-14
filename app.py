@@ -395,23 +395,23 @@ def debug_full_state():
 def debug_signal_test():
     """
     Runs the real signal pipeline on live candles for a symbol
-    and sends a full diagnostic to Telegram.
+    and sends a full diagnostic to Telegram including HTF bar data.
  
     Usage:
         /debug/signal-test?key=YOUR_KEY&symbol=VETUSDT
-        /debug/signal-test?key=YOUR_KEY&symbol=VETUSDT&bars=50
+        /debug/signal-test?key=YOUR_KEY&symbol=VETUSDT&bars=20
     """
     if request.args.get("key") != os.getenv("RUN_KEY", "local"):
         abort(403)
  
-    symbol = request.args.get("symbol", "TRXUSDT").upper()
-    bars   = int(request.args.get("bars", 20))   # how many recent 1H bars to show signal for
+    symbol = request.args.get("symbol", "VETUSDT").upper()
+    bars   = int(request.args.get("bars", 20))
  
     import threading
  
     def run_test():
         from data_pipeline.updater import update_symbol
-        from indicators.indicators import generate_signal
+        from indicators.indicators import generate_signal, htf_structural_stack
         from execution.notifier import TelegramNotifier
         import pandas as pd
  
@@ -437,24 +437,95 @@ def debug_signal_test():
             )
  
             # --------------------------------------------------
-            # 2. Run the REAL signal generator (live=True, same as prod)
+            # 2. HTF RAW DIAGNOSTIC — before generate_signal()
+            #    Shows exactly what 4H bars are feeding the quality score
+            #    and whether any partial/open candle is sneaking in
+            # --------------------------------------------------
+            now_hour = pd.Timestamp.now(tz="UTC").floor("h")
+ 
+            # This mirrors what generate_signal() does internally
+            htf_clipped = df_4h[df_4h.index < now_hour].copy()
+ 
+            # Run htf_structural_stack on the clipped data to get quality scores
+            # We need a dummy 1H df just for alignment — use last 10 bars
+            dummy_1h = df_1h.iloc[-10:].copy()
+            try:
+                htf_stack_raw = htf_structural_stack(dummy_1h, htf_clipped)
+            except Exception as htf_err:
+                htf_stack_raw = None
+ 
+            # Last 5 raw 4H bars
+            htf_last5 = df_4h.tail(5)
+            htf_lines = []
+            for ts, row in htf_last5.iterrows():
+                wat = (ts + pd.Timedelta(hours=1)).strftime("%m-%d %H:%M")
+                is_open = ts >= now_hour
+                status = "⚠️ OPEN" if is_open else "✅ closed"
+                htf_lines.append(
+                    f"`{wat}` {status}\n"
+                    f"  O={row['open']:.4f} H={row['high']:.4f} "
+                    f"L={row['low']:.4f} C={row['close']:.4f} "
+                    f"V={row['volume']:.0f}"
+                )
+ 
+            # Check if clipped htf matches raw htf last bar
+            raw_last_ts     = df_4h.index[-1]
+            clipped_last_ts = htf_clipped.index[-1] if not htf_clipped.empty else None
+            partial_excluded = raw_last_ts != clipped_last_ts
+ 
+            notifier.send_text(
+                f"📊 *HTF RAW BARS (last 5 4H candles)*\n"
+                f"`{symbol}`\n"
+                f"now_hour (UTC): `{now_hour}`\n"
+                f"raw last 4H ts: `{raw_last_ts}`\n"
+                f"clipped last 4H ts: `{clipped_last_ts}`\n"
+                f"partial candle excluded: `{partial_excluded}`\n"
+                f"\n" + "\n".join(htf_lines)
+            )
+ 
+            # --------------------------------------------------
+            # 3. Run the REAL signal generator (live=True, same as prod)
             # --------------------------------------------------
             df_sig = generate_signal(df_1h.copy(), df_4h.copy(), live=True)
  
             # --------------------------------------------------
-            # 3. Extract key diagnostics from the last N bars
+            # 4. HTF QUALITY TRACE — last 6 1H bars with their
+            #    forward-filled HTF quality at that moment
+            #    This shows if quality changed around signal time
             # --------------------------------------------------
-            recent = df_sig.iloc[-bars:].copy()
+            recent_sig = df_sig.iloc[-6:].copy()
+            quality_lines = []
+            for ts, row in recent_sig.iterrows():
+                wat = (ts + pd.Timedelta(hours=1)).strftime("%m-%d %H:%M")
+                sig = int(row.get('final_signal', 0))
+                q   = float(row.get('HTF_QUALITY', 0))
+                d   = int(row.get('HTF_DIRECTION', 0))
+                sig_str = f"{'🟢 LONG' if sig == 1 else '🔴 SHORT' if sig == -1 else '⬜ flat'}"
+                gate_str = "🔴 blocked" if q <= 0.45 else "🟢 passing"
+                quality_lines.append(
+                    f"`{wat}` | Q=`{q:.4f}` {gate_str} | "
+                    f"dir=`{'L' if d==1 else 'S' if d==-1 else 'F'}` | {sig_str}"
+                )
  
+            notifier.send_text(
+                f"📈 *HTF QUALITY TRACE (last 6 1H bars)*\n"
+                f"`{symbol}`\n"
+                f"threshold=0.45\n\n" +
+                "\n".join(quality_lines)
+            )
+ 
+            # --------------------------------------------------
+            # 5. Extract key diagnostics from the last bar
+            # --------------------------------------------------
             htf_quality   = float(df_sig['HTF_QUALITY'].iloc[-1])
             htf_direction = int(df_sig['HTF_DIRECTION'].iloc[-1])
             htf_blocked   = htf_quality <= 0.45
  
             signal_last   = int(df_sig['final_signal'].iloc[-1])
             signal_count  = int((df_sig['final_signal'] != 0).sum())
+            recent        = df_sig.iloc[-bars:]
             recent_signals = (recent['final_signal'] != 0).sum()
  
-            # Key intermediate conditions on the last bar
             last = df_sig.iloc[-1]
             valid_break_long  = bool(last.get('VALID_BREAK_LONG', False))
             valid_break_short = bool(last.get('VALID_BREAK_SHORT', False))
@@ -468,21 +539,17 @@ def debug_signal_test():
             struct_state      = int(last.get('STRUCT_STATE', 0))
             participation     = int(last.get('PARTICIPATION', 0))
  
-            # --------------------------------------------------
-            # 4. Build signal history string (last N bars)
-            # --------------------------------------------------
+            # signal history
             sig_history = []
             for ts, row in recent.iterrows():
                 s = int(row['final_signal'])
                 if s != 0:
                     wat = (ts + pd.Timedelta(hours=1)).strftime("%m-%d %H:%M")
-                    sig_history.append(f"`{wat}` → `{'LONG' if s == 1 else 'SHORT'}`")
- 
+                    sig_history.append(
+                        f"`{wat}` → `{'LONG' if s == 1 else 'SHORT'}`"
+                    )
             sig_history_str = "\n".join(sig_history) if sig_history else "none in last window"
  
-            # --------------------------------------------------
-            # 5. Send full diagnostic
-            # --------------------------------------------------
             htf_status = "🔴 BLOCKED" if htf_blocked else "🟢 PASSING"
  
             notifier.send_text(
@@ -521,7 +588,7 @@ def debug_signal_test():
                 f"💥 *SIGNAL TEST FAILED*\n"
                 f"`{symbol}`\n"
                 f"error=`{str(e)[:300]}`\n"
-                f"```{traceback.format_exc()[:500]}```"
+                f"trace=`{traceback.format_exc()[:400]}`"
             )
  
     thread = threading.Thread(target=run_test)
