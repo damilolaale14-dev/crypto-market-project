@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, FIL, LINK, ATOM, OP, FXS, LTC, SNX, CRV, RUNE
 # ==========================================================
 
-SYMBOL = "LINKUSDT"
+SYMBOL = "VETUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -125,7 +125,7 @@ HTF_LIMIT = 250   # ~120 days of 4h candles
 # ==========================================================
 
 print("Downloading LLTF data (5m)...")
-lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
+# lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
 
 print("Downloading LTF data (1h)...")
 ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
@@ -133,7 +133,7 @@ ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
 print("Downloading HTF data (4h)...")
 htf_df = fetch_binance(SYMBOL, HTF_INTERVAL, HTF_LIMIT)
 
-lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
+# lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
 ltf_df.index = pd.to_datetime(ltf_df.index, utc=True)
 htf_df.index = pd.to_datetime(htf_df.index, utc=True)
 
@@ -152,7 +152,7 @@ ltf_df = generate_signal(ltf_df, htf_df)
 # BACKTEST
 # ==========================================================
 
-backtester = SignalBacktester(ltf_df, htf_df=htf_df, lltf_df=lltf_df, leverage=LEVERAGE)
+backtester = SignalBacktester(ltf_df, htf_df=htf_df, leverage=LEVERAGE)
 
 backtest_output = backtester.run()
 
