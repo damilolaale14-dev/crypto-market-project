@@ -404,7 +404,7 @@ def debug_signal_test():
     if request.args.get("key") != os.getenv("RUN_KEY", "local"):
         abort(403)
  
-    symbol = request.args.get("symbol", "VETUSDT").upper()
+    symbol = request.args.get("symbol", "TRXUSDT").upper()
     bars   = int(request.args.get("bars", 20))   # how many recent 1H bars to show signal for
  
     import threading
