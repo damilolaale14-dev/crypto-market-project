@@ -140,8 +140,12 @@ def run_hourly_for_symbol(
     notify_override=None,
     verbose=True,
     replay_cursor=None,
-    external_pm=None,          # FIX 2: accept shared PM from replay caller
+    external_pm=None,
+    injected_df=None,
+    injected_htf=None,
+    injected_lltf=None,
 ):
+    is_injection = injected_df is not None
     is_live = not replay and forced_time is None
     notify = notify_override if notify_override is not None else is_live
     notifier = TelegramNotifier()
@@ -149,7 +153,7 @@ def run_hourly_for_symbol(
     # -------------------
     # FAST GATE — skip entire symbol if no new 5m bar (LIVE ONLY)
     # -------------------
-    if is_live:
+    if is_live and not is_injection:
         cursor_file = _last_5m_file(symbol, True)
         if os.path.exists(cursor_file):
             try:
@@ -237,7 +241,11 @@ def run_hourly_for_symbol(
         # FETCH DATA
         # -------------------
         try:
-            if forced_time is None and not replay:
+            if is_injection:
+                df      = injected_df.copy()
+                htf_df  = injected_htf.copy()
+                lltf_df = injected_lltf.copy()
+            elif forced_time is None and not replay:
                 df, htf_df, lltf_df = update_symbol(symbol)
             else:
                 df, htf_df, lltf_df = update_symbol(symbol)
@@ -264,43 +272,34 @@ def run_hourly_for_symbol(
         # -------------------
         # INCOMPLETE CANDLE GUARD (live only — replay/backtest unaffected)
         # -------------------
-        now_utc = datetime.now(timezone.utc)
-        minutes_floored = (now_utc.minute // 5) * 5
-        current_5m_boundary = pd.Timestamp(
-            now_utc.replace(minute=minutes_floored, second=0, microsecond=0)
-        ).tz_convert("UTC")
+        if not is_injection:
+            now_utc = datetime.now(timezone.utc)
+            minutes_floored = (now_utc.minute // 5) * 5
+            current_5m_boundary = pd.Timestamp(
+                now_utc.replace(minute=minutes_floored, second=0, microsecond=0)
+            ).tz_convert("UTC")
 
-        now_utc_ts = pd.Timestamp(now_utc).tz_convert("UTC")
-        seconds_elapsed = (now_utc_ts - current_5m_boundary).total_seconds()
-        boundary_in_data = current_5m_boundary in lltf_df.index
-        boundary_is_hour_open = current_5m_boundary.minute == 0
+            now_utc_ts = pd.Timestamp(now_utc).tz_convert("UTC")
+            seconds_elapsed = (now_utc_ts - current_5m_boundary).total_seconds()
+            boundary_in_data = current_5m_boundary in lltf_df.index
+            boundary_is_hour_open = current_5m_boundary.minute == 0
 
-        # generate_signal hasn't run yet here — check after it runs below
-        # (split the guard: include decision is made after signal gen)
-        _early_entry_eligible = (
-            is_live
-            and seconds_elapsed >= 30
-            and boundary_in_data
-            and boundary_is_hour_open
-        )
+            _early_entry_eligible = (
+                is_live
+                and seconds_elapsed >= 30
+                and boundary_in_data
+                and boundary_is_hour_open
+            )
 
-        if _early_entry_eligible:
-            lltf_df = lltf_df[lltf_df.index <= current_5m_boundary].copy()
-            print(f"[EARLY ENTRY GUARD] {symbol} — boundary bar {current_5m_boundary} included ({seconds_elapsed:.0f}s elapsed)")
-        else:
-            lltf_df = lltf_df[lltf_df.index < current_5m_boundary].copy()
+            if _early_entry_eligible:
+                lltf_df = lltf_df[lltf_df.index <= current_5m_boundary].copy()
+                print(f"[EARLY ENTRY GUARD] {symbol} — boundary bar {current_5m_boundary} included ({seconds_elapsed:.0f}s elapsed)")
+            else:
+                lltf_df = lltf_df[lltf_df.index < current_5m_boundary].copy()
 
-        # notifier.debug(
-        #     f"[CANDLE GUARD] {symbol}\n"
-        #     f"5m_boundary={current_5m_boundary}\n"
-        #     f"lltf_last_before={lltf_last_before}\n"
-        #     f"lltf_last_after={lltf_df.index[-1] if not lltf_df.empty else 'EMPTY'}\n"
-        #     f"incomplete_bar_removed={lltf_last_before >= current_5m_boundary}"
-        # )
-
-        if lltf_df.empty:
-            notifier.debug(f"[CANDLE GUARD EMPTY] {symbol} — lltf_df empty after clip, skipping")
-            return None, replay_cursor
+            if lltf_df.empty:
+                notifier.debug(f"[CANDLE GUARD EMPTY] {symbol} — lltf_df empty after clip, skipping")
+                return None, replay_cursor
 
         # -------------------
         # GENERATE & MAP SIGNALS
@@ -406,8 +405,9 @@ def run_hourly_for_symbol(
             raw = last_5m_seen.get(symbol) or (last_5m_seen if isinstance(last_5m_seen, str) else None)
             last_seen = pd.Timestamp(raw) if raw else None
 
-        if is_live and last_seen == latest_ts:
-            # notifier.debug(f"[CURSOR AT TIP] {symbol} — last_seen={last_seen} == latest_ts={latest_ts}, nothing to do")
+        if is_injection:
+            last_seen = None
+        elif is_live and last_seen == latest_ts:
             return None
 
         if last_seen is None and not replay and not forced_time:
@@ -526,7 +526,7 @@ def run_hourly_for_symbol(
                     f"pnl={pos.get('pnl_r', 0.0):+.3f}R"
                 )
 
-        if not replay and replay_cursor is None:
+        if not replay and replay_cursor is None and not is_injection:
             if not new_bars.empty:
                 current_1h_open = pd.Timestamp(datetime.now(timezone.utc)).floor("h")
                 has_open_position = symbol in pm.positions
@@ -534,8 +534,6 @@ def run_hourly_for_symbol(
                 if has_open_position:
                     last_clean_ts = new_bars.index[-1]
                 else:
-                    # advance cursor fully — candle guard in update_symbol
-                    # already prevents incomplete bars from leaking in
                     last_clean_ts = new_bars.index[-1]
 
                 if last_clean_ts is not None:
@@ -546,7 +544,7 @@ def run_hourly_for_symbol(
         # ==========================================================
         # SAVE LAST PROCESSED HOUR
         # ==========================================================
-        if not replay and not forced_time:
+        if not replay and not forced_time and not is_injection:
             cursor_file = _last_5m_file(symbol, True)
             cursor_exists = os.path.exists(cursor_file)
 

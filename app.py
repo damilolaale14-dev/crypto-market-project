@@ -393,18 +393,6 @@ def debug_full_state():
 
 @app.route("/debug/signal-test")
 def debug_signal_test():
-    """
-    TRUE end-to-end live injection test.
-
-    Crafts a fake 1H + 5M candle engineered to pass ALL signal conditions,
-    appends it to real cached parquets, then calls run_hourly_for_symbol()
-    — the exact same function the cron uses. If your notification pipeline,
-    cursor logic, and position manager all work, you'll get a real TRADE READY
-    message in Telegram. Cleans up fake candles afterward.
-
-    Usage:
-        /debug/signal-test?key=YOUR_KEY&symbol=TRXUSDT
-    """
     if request.args.get("key") != os.getenv("RUN_KEY", "local"):
         abort(403)
 
@@ -414,34 +402,33 @@ def debug_signal_test():
 
     def run_injection():
         import pandas as pd
-        import numpy as np
         from execution.notifier import TelegramNotifier
         from execution.hourly_runner import run_hourly_for_symbol
         from data_pipeline.updater import CACHE_DIR
+        from indicators.indicators import atr_ema
 
         notifier = TelegramNotifier()
+
         path_1h = os.path.join(CACHE_DIR, f"{symbol}_1h.parquet")
         path_4h = os.path.join(CACHE_DIR, f"{symbol}_4h.parquet")
         path_5m = os.path.join(CACHE_DIR, f"{symbol}_5m.parquet")
 
-        # ── 0. Check caches exist ──────────────────────────────────
         for p in [path_1h, path_4h, path_5m]:
             if not os.path.exists(p):
                 notifier.send_text(
-                    f"💥 *SIGNAL TEST ABORTED*\n"
+                    f"💥 *INJECTION TEST ABORTED*\n"
                     f"Cache missing: `{p}`\n"
-                    f"Run `/` first to populate caches."
+                    f"Hit the hourly trigger first."
                 )
                 return
 
         notifier.send_text(
             f"🧪 *INJECTION TEST STARTED*\n"
-            f"Symbol: `{symbol}`\n"
-            f"Loading real cached data..."
+            f"Symbol: `{symbol}`"
         )
 
         try:
-            # ── 1. Load real caches ────────────────────────────────
+            # 1. Load real caches
             df_1h = pd.read_parquet(path_1h)
             df_4h = pd.read_parquet(path_4h)
             df_5m = pd.read_parquet(path_5m)
@@ -455,63 +442,22 @@ def debug_signal_test():
 
             last_real_1h = df_1h.index[-1]
             last_real_5m = df_5m.index[-1]
-            last_close   = float(df_1h["close"].iloc[-1])
-            last_high     = float(df_1h["high"].iloc[-1])
-            last_low      = float(df_1h["low"].iloc[-1])
 
-            # ── 2. Compute ATR from real data ──────────────────────
-            # Use last 14 bars to get a live ATR estimate
-            recent = df_1h.iloc[-14:]
-            tr = pd.concat([
-                recent["high"] - recent["low"],
-                (recent["high"] - recent["close"].shift()).abs(),
-                (recent["low"]  - recent["close"].shift()).abs(),
-            ], axis=1).max(axis=1)
-            atr = float(tr.ewm(span=14, adjust=False).mean().iloc[-1])
-
-            notifier.send_text(
-                f"📥 *REAL DATA LOADED*\n"
-                f"`{symbol}`\n"
-                f"1H bars: `{len(df_1h)}` | last: `{last_real_1h}`\n"
-                f"4H bars: `{len(df_4h)}`\n"
-                f"5M bars: `{len(df_5m)}` | last: `{last_real_5m}`\n"
-                f"Last close: `{last_close:.6f}`\n"
-                f"ATR: `{atr:.6f}`"
-            )
-
-            # ── 3. Engineer fake 1H candle ─────────────────────────
-            # Goal: pass EVERY gate in generate_signal()
-            #
-            # COMPRESSION_OK  → need COMPRESSION_BARS >= 3
-            #   VER < 0.95 (ATR_FAST < ATR_SLOW) + ER < 0.45 (sideways)
-            #   → small body, small range, inside last few bars
-            #
-            # VALID_BREAK_LONG → COMPRESSION_OK + EARLY_EXPANSION
-            #   EARLY_EXPANSION = EXPANSION_MATURITY < 0.6
-            #   → we just need the breakout to happen on a fresh move
-            #
-            # HTF_QUALITY > 0.45 → we cannot fake this (uses 4H data)
-            #   → we accept it may still block; the test proves everything else
-            #
-            # ENTRY_LONG → PBPE conditions (pullback or micro break)
-            #   → close above rolling resistance with strong body
-            #
-            # Strategy: fake candle breaks above the 20-bar resistance
-            # with 3x normal volume and a strong bull body
-
+            # 2. Compute levels from real data
+            atr        = float(atr_ema(df_1h, period=14).iloc[-1])
             resistance = float(df_1h["high"].rolling(20).max().iloc[-1])
-            
-            # Fake candle opens just below resistance and closes above it
-            # by more than 0.5 * ATR (breakout_logic atr_k=0.5)
-            fake_open  = resistance - atr * 0.1          # just below
-            fake_close = resistance + atr * 0.6           # clear breakout
-            fake_high  = fake_close + atr * 0.15          # small upper wick
-            fake_low   = fake_open  - atr * 0.05          # minimal lower wick
-            fake_vol   = float(df_1h["volume"].rolling(20).mean().iloc[-1]) * 3.0
+            avg_vol    = float(df_1h["volume"].rolling(20).mean().iloc[-1])
 
-            fake_1h_ts = last_real_1h + pd.Timedelta(hours=1)
+            # 3. Fake 1H — replaces last real bar so timestamp is in the past
+            # is_injection sets last_seen=None so cursor does not block these bars
+            fake_1h_ts = last_real_1h
+            fake_open  = resistance - atr * 0.05
+            fake_close = resistance + atr * 0.6   # clears by 0.6 ATR, threshold is 0.5
+            fake_high  = fake_close + atr * 0.1
+            fake_low   = fake_open  - atr * 0.05
+            fake_vol   = avg_vol * 3.0
 
-            fake_1h = pd.DataFrame([{
+            fake_1h_row = pd.DataFrame([{
                 "open":   fake_open,
                 "high":   fake_high,
                 "low":    fake_low,
@@ -519,143 +465,96 @@ def debug_signal_test():
                 "volume": fake_vol,
             }], index=pd.DatetimeIndex([fake_1h_ts], tz="UTC"))
 
-            # ── 4. Engineer fake 5M candles for that hour ──────────
-            # 12 × 5m bars covering the fake 1H window
-            # First bar: strong bull body (entry trigger)
-            # Remaining 11: quiet continuation
+            # 4. Fake 5M — 12 bars anchored inside the last real hour
+            # First bar is the entry trigger, rest are quiet drift
+            fake_5m_base = last_real_1h  # start of the last real 1H bar
             fake_5m_rows = []
+            fake_5m_timestamps = []
+
             for i in range(12):
-                ts_5m = fake_1h_ts + pd.Timedelta(minutes=5 * i)
+                ts_5m = fake_5m_base + pd.Timedelta(minutes=5 * i)
+                fake_5m_timestamps.append(ts_5m)
                 if i == 0:
-                    # Entry bar — strong momentum
-                    o = fake_open
-                    c = fake_close
-                    h = fake_high
-                    l = fake_low
+                    o, c, h, l = fake_open, fake_close, fake_high, fake_low
                     v = fake_vol / 4
                 else:
-                    # Continuation — quiet drift
-                    drift = atr * 0.02 * i
-                    o = fake_close + drift
-                    c = o + atr * 0.01
-                    h = c + atr * 0.02
-                    l = o - atr * 0.01
-                    v = fake_vol / 20
+                    base = fake_close + atr * 0.01 * i
+                    o = base
+                    c = base + atr * 0.005
+                    h = c    + atr * 0.01
+                    l = o    - atr * 0.005
+                    v = avg_vol / 10
                 fake_5m_rows.append({
-                    "open": o, "high": h, "low": l,
-                    "close": c, "volume": v,
+                    "open": o, "high": h, "low": l, "close": c, "volume": v,
                 })
 
-            fake_5m_index = pd.DatetimeIndex(
-                [fake_1h_ts + pd.Timedelta(minutes=5 * i) for i in range(12)],
-                tz="UTC"
+            fake_5m = pd.DataFrame(
+                fake_5m_rows,
+                index=pd.DatetimeIndex(fake_5m_timestamps, tz="UTC")
             )
-            fake_5m = pd.DataFrame(fake_5m_rows, index=fake_5m_index)
+
+            # 5. Build injected dataframes
+            # Replace last real 1H bar with fake breakout bar
+            df_1h_injected = pd.concat([
+                df_1h[df_1h.index < fake_1h_ts],
+                fake_1h_row,
+            ]).sort_index()
+
+            # Replace 5M bars in the last real 1H window with fake bars
+            df_5m_injected = pd.concat([
+                df_5m[df_5m.index < fake_5m_base],
+                fake_5m,
+            ])
+            df_5m_injected = df_5m_injected[
+                ~df_5m_injected.index.duplicated(keep="last")
+            ].sort_index()
+
+            # 4H stays real — HTF quality depends on real 4H bars
+            df_4h_real = df_4h.copy()
 
             notifier.send_text(
-                f"🔧 *FAKE CANDLE ENGINEERED*\n"
+                f"🔧 *FAKE CANDLE BUILT*\n"
                 f"`{symbol}`\n"
                 f"1H ts: `{fake_1h_ts}`\n"
-                f"open: `{fake_open:.6f}`\n"
-                f"close: `{fake_close:.6f}`\n"
-                f"high: `{fake_high:.6f}`\n"
-                f"resistance was: `{resistance:.6f}`\n"
-                f"breakout by: `{(fake_close - resistance):.6f}` (`{((fake_close-resistance)/atr):.2f}` ATR)\n"
-                f"volume: `{fake_vol:.0f}` (3× avg)\n"
-                f"5M bars injected: `12`"
+                f"open: `{fake_open:.6f}` close: `{fake_close:.6f}`\n"
+                f"resistance: `{resistance:.6f}`\n"
+                f"breakout: `{(fake_close - resistance) / atr:.2f}` ATR\n"
+                f"volume: `{fake_vol:.0f}` (3x avg)\n"
+                f"5M bars: `12` inside last real 1H window\n"
+                f"cursor: untouched\n"
+                f"HTF: real 4H — may still block if quality < 0.45"
             )
 
-            # ── 5. Inject into parquets ────────────────────────────
-            df_1h_injected = pd.concat([df_1h, fake_1h])
-            df_1h_injected = df_1h_injected[~df_1h_injected.index.duplicated(keep="last")]
-            df_1h_injected.sort_index().to_parquet(path_1h)
-
-            df_5m_injected = pd.concat([df_5m, fake_5m])
-            df_5m_injected = df_5m_injected[~df_5m_injected.index.duplicated(keep="last")]
-            df_5m_injected.sort_index().to_parquet(path_5m)
-
-            # Also wipe the live cursor for this symbol so the runner
-            # doesn't fast-gate and skip the new candle
-            cursor_path = f"data/cursors/live_{symbol}.json"
-            cursor_backup = None
-            if os.path.exists(cursor_path):
-                with open(cursor_path, "r") as f:
-                    cursor_backup = f.read()
-                os.remove(cursor_path)
+            # 6. Call the real live runner
+            # injected_df bypasses update_symbol(), candle guard,
+            # fast-gate, cursor write, and hour memory write.
+            # Everything else is real: generate_signal(), PositionManager,
+            # notify_open(), Telegram notification.
+            result = run_hourly_for_symbol(
+                symbol,
+                injected_df=df_1h_injected,
+                injected_htf=df_4h_real,
+                injected_lltf=df_5m_injected,
+                notify_override=True,
+            )
 
             notifier.send_text(
-                f"💉 *INJECTED INTO CACHE*\n"
+                f"✅ *RUNNER RETURNED*\n"
                 f"`{symbol}`\n"
-                f"New 1H tail: `{df_1h_injected.index[-1]}`\n"
-                f"New 5M tail: `{df_5m_injected.index[-1]}`\n"
-                f"Cursor wiped: `{cursor_backup is not None}`\n"
-                f"Calling live runner now..."
+                f"result: `{str(result)[:300]}`\n"
+                f"TRADE READY above = pipeline works end to end.\n"
+                f"No TRADE READY = blocked by HTF quality, "
+                f"compression state, or reentry lock."
             )
-
-            # ── 6. Call the REAL live runner ───────────────────────
-            # This is the exact same function the cron calls.
-            # It will: update_symbol() → generate_signal() →
-            # stream 5m bars → PositionManager.update() →
-            # notify_open() if signal fires
-            try:
-                result = run_hourly_for_symbol(symbol)
-                notifier.send_text(
-                    f"✅ *RUNNER RETURNED*\n"
-                    f"`{symbol}`\n"
-                    f"result=`{str(result)[:200]}`\n"
-                    f"Check above for TRADE READY message.\n"
-                    f"If none appeared, signal was blocked — see diagnostics."
-                )
-            except Exception as run_err:
-                import traceback
-                notifier.send_text(
-                    f"💥 *RUNNER CRASHED*\n"
-                    f"`{symbol}`\n"
-                    f"error=`{str(run_err)[:300]}`\n"
-                    f"trace=`{traceback.format_exc()[:400]}`"
-                )
 
         except Exception as e:
             import traceback
             notifier.send_text(
                 f"💥 *INJECTION TEST FAILED*\n"
                 f"`{symbol}`\n"
-                f"error=`{str(e)[:300]}`\n"
-                f"trace=`{traceback.format_exc()[:400]}`"
+                f"error: `{str(e)[:300]}`\n"
+                f"trace: `{traceback.format_exc()[:500]}`"
             )
-
-        finally:
-            # ── 7. Always clean up fake candles ───────────────────
-            try:
-                df_1h_clean = pd.read_parquet(path_1h)
-                df_1h_clean.index = pd.to_datetime(df_1h_clean.index, utc=True)
-                df_1h_clean = df_1h_clean[df_1h_clean.index <= last_real_1h]
-                df_1h_clean.to_parquet(path_1h)
-
-                df_5m_clean = pd.read_parquet(path_5m)
-                df_5m_clean.index = pd.to_datetime(df_5m_clean.index, utc=True)
-                df_5m_clean = df_5m_clean[df_5m_clean.index <= last_real_5m]
-                df_5m_clean.to_parquet(path_5m)
-
-                # Restore cursor if it existed
-                if cursor_backup is not None:
-                    with open(cursor_path, "w") as f:
-                        f.write(cursor_backup)
-
-                notifier.send_text(
-                    f"🧹 *CLEANUP DONE*\n"
-                    f"`{symbol}`\n"
-                    f"1H restored to: `{last_real_1h}`\n"
-                    f"5M restored to: `{last_real_5m}`\n"
-                    f"Cursor restored: `{cursor_backup is not None}`"
-                )
-            except Exception as clean_err:
-                notifier.send_text(
-                    f"⚠️ *CLEANUP FAILED*\n"
-                    f"`{symbol}`\n"
-                    f"error=`{str(clean_err)[:200]}`\n"
-                    f"Parquets may be dirty — check manually."
-                )
 
     thread = threading.Thread(target=run_injection)
     thread.daemon = True
