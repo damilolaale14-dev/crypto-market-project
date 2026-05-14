@@ -4,7 +4,8 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from data_pipeline.fetcher import fetch_ohlcv
-from data_pipeline.validators import validate_ohlcv#
+from data_pipeline.validators import validate_ohlcv
+from execution.notifier import TelegramNotifier
 
 
 CACHE_DIR = "data/cache"
@@ -124,7 +125,35 @@ def update_symbol(symbol: str):
                 df_htf = df_htf[df_htf.index <= now_hour - timedelta(hours=1)]
                 return df, df_htf, df_lltf
         except Exception as e:
-            print(f"[SKIP CHECK FAILED] {symbol} — {e}, proceeding with full fetch")
+            import pyarrow.lib as _pal
+            # ArrowInvalid inherits from ValueError — must check isinstance
+            # before any isinstance(e, ValueError) branch or it gets swallowed.
+            _is_file_error = isinstance(
+                e, (OSError, PermissionError, MemoryError,
+                    _pal.ArrowInvalid, _pal.ArrowIOError)
+            )
+            if _is_file_error:
+                print(f"[CACHE CORRUPT] {symbol} — {type(e).__name__}: {e}")
+                for _p in [path_lltf, path_ltf]:
+                    try:
+                        if os.path.exists(_p):
+                            os.remove(_p)
+                            print(f"[CACHE CORRUPT] deleted {_p}")
+                    except Exception:
+                        pass
+                try:
+                    TelegramNotifier().send_text(
+                        f"⚠️ *CACHE FILE ERROR*\n"
+                        f"`{symbol}` `{type(e).__name__}`\n"
+                        f"`{str(e)[:200]}`"
+                    )
+                except Exception:
+                    pass
+            elif isinstance(e, (ValueError, KeyError, IndexError)):
+                print(f"[SKIP CHECK BYPASSED] {symbol} — {e}, fetching")
+            else:
+                print(f"[SKIP FAILED] {symbol} — {type(e).__name__}: {e}")
+            # always fall through to full fetch
 
     now_full = now   # preserve full-precision timestamp for 5m fetch
     now = now_hour   # 1H and 4H fetches use top-of-hour only
@@ -190,6 +219,14 @@ def update_symbol(symbol: str):
     # --------------------------------------------------
     # GAP CHECK
     # --------------------------------------------------
+
+    # Floor to the interval frequency before comparison.
+    # Binance occasionally returns candles with sub-millisecond timestamp
+    # offsets (13:00:00.001 instead of 13:00:00.000). Without flooring,
+    # symmetric_difference sees the offset bar as both missing and extra,
+    # raises RuntimeError, and the symbol is dead until cache rebuilds.
+    df.index = df.index.floor(LTF_INTERVAL)
+    df = df[~df.index.duplicated(keep="last")]
 
     expected = pd.date_range(
         start=df.index[0],

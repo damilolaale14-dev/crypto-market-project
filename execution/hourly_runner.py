@@ -307,12 +307,16 @@ def run_hourly_for_symbol(
         # -------------------
         df = generate_signal(df.copy(), htf_df.copy(), live=is_live)
 
+        _htf_quality   = float(df['HTF_QUALITY'].iloc[-1])
+        _htf_direction = int(df['HTF_DIRECTION'].iloc[-1])
+        _signal_count  = int((df['final_signal'] != 0).sum())
+
         print(
             f"[HTF CHECK] {symbol} | "
-            f"HTF_QUALITY={df['HTF_QUALITY'].iloc[-1]:.4f} | "
-            f"HTF_DIRECTION={df['HTF_DIRECTION'].iloc[-1]} | "
+            f"HTF_QUALITY={_htf_quality:.4f} | "
+            f"HTF_DIRECTION={_htf_direction} | "
             f"final_signal_last={df['final_signal'].iloc[-1]} | "
-            f"signals_total={(df['final_signal'] != 0).sum()}"
+            f"signals_total={_signal_count}"
         )
 
         if 'final_signal' not in df.columns or len(df) < 2:
@@ -328,10 +332,13 @@ def run_hourly_for_symbol(
         )
 
         # zero out signal on 5m bars that fall within the signal bar's own 1H window
-        # entry is only valid AFTER the signal 1H bar has fully closed
+        # entry is only valid AFTER the signal 1H bar has fully closed.
+        # Use <= to include the boundary bar (XX:00) itself — when
+        # _early_entry_eligible fires, that bar is included in lltf_df but
+        # must not carry a signal. First valid entry bar is XX:05.
         signal_bar_ts = df.index[-1]
         signal_bar_end = signal_bar_ts + pd.Timedelta(hours=1)
-        within_signal_bar = (lltf_df.index >= signal_bar_ts) & (lltf_df.index < signal_bar_end)
+        within_signal_bar = (lltf_df.index >= signal_bar_ts) & (lltf_df.index <= signal_bar_end)
         lltf_df.loc[within_signal_bar, "final_signal"] = 0
 
         # notifier.debug(
@@ -376,6 +383,18 @@ def run_hourly_for_symbol(
         latest_hour_ts = df.index[-1].isoformat()
         previous_hour  = last_hour_seen.get(symbol)
         new_hour = latest_hour_ts != previous_hour
+
+        # Alert when HTF filter is blocking all signals.
+        # Without this, zero signals from a blocked HTF filter is
+        # indistinguishable from zero signals from no setups.
+        # new_hour guard fires once per hour per symbol, not every cron run.
+        if _htf_quality <= 0.45 and new_hour:
+            notifier.debug(
+                f"[HTF BLOCKED] {symbol} | "
+                f"quality={_htf_quality:.4f} threshold=0.45 | "
+                f"dir={_htf_direction} | "
+                f"no signals will fire this hour"
+            )
 
         # =========================
         # STREAMING ENGINE
@@ -436,6 +455,7 @@ def run_hourly_for_symbol(
         bar_results = []
 
         # notifier.debug(f"[REPLAY LOOP] {symbol} — processing {len(new_bars)} bars from {new_bars.index[0]} to {new_bars.index[-1]}")
+        _current_signal_birth = None  # anchors signal expiry to first signal bar
         for _, row_5m in new_bars.iterrows():
 
             if pd.isna(row_5m["final_signal"]):
@@ -445,12 +465,17 @@ def run_hourly_for_symbol(
 
             ltf_row = df.iloc[int(row_5m["ltf_index"])]
 
-            # Store the 1H row where this signal first appeared so expiry
-            # is measured from signal birth, not the current 1H candle.
-            # We find the earliest 1H bar that has this signal value.
+            # Anchor expiry to signal birth — the first 1H bar where this
+            # signal appeared. _current_signal_birth does not advance with
+            # each new 1H bar, so expiry is measured correctly.
+            # Resets to None when signal goes flat so the next signal
+            # gets its own fresh birth anchor.
             if bar_signal != 0:
-                signal_birth_row = ltf_row
+                if _current_signal_birth is None:
+                    _current_signal_birth = ltf_row
+                signal_birth_row = _current_signal_birth
             else:
+                _current_signal_birth = None
                 signal_birth_row = ltf_row
 
             if bar_signal != 0:
@@ -575,16 +600,30 @@ def run_hourly_for_symbol(
         traceback.print_exc()
         return None
 
-def map_ltf_to_htf(lltf_df: pd.DataFrame, htf_df: pd.DataFrame):
+def map_ltf_to_htf(lltf_df: pd.DataFrame, ltf_df: pd.DataFrame):
+    """
+    Maps each 5m bar to its parent 1H candle index.
+    ltf_df MUST be the 1H dataframe.
+    Passing 4H data silently corrupts every ltf_index, ATR, and entry price.
+    This assertion catches that immediately instead of trading on wrong data.
+    """
+    if len(ltf_df) >= 3:
+        _inferred = pd.infer_freq(ltf_df.index[:min(10, len(ltf_df))])
+        if _inferred not in (None, "h", "1h", "H", "1H", "60min", "60T", "T60"):
+            raise ValueError(
+                f"map_ltf_to_htf: expected 1H dataframe, "
+                f"got inferred freq='{_inferred}'. "
+                f"Pass the 1H df, not the 4H df."
+            )
 
-    htf_times = htf_df.index
+    ltf_times = ltf_df.index
 
     ltf_index = []
 
     for ts in lltf_df.index:
 
         # find correct 1H candle start
-        idx = htf_times.searchsorted(ts, side="right") - 1
+        idx = ltf_times.searchsorted(ts, side="right") - 1
 
         if idx < 0:
             idx = 0

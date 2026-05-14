@@ -82,6 +82,7 @@ class PositionManager:
         self._executed_signals = set()
         self._reentry_lock: dict[str, int] = {}
         self._reentry_lock_ts: dict[str, pd.Timestamp] = {}
+        self._just_unlocked: set[str] = set()
         self._dirty = False
 
     # --------------------------------------------------
@@ -256,6 +257,9 @@ class PositionManager:
         # =====================================================
         # 🔓 REENTRY UNLOCK LOGIC
         # =====================================================
+        # Clear grace flag from the previous bar before checking locks.
+        self._just_unlocked.discard(symbol)
+
         if symbol in self._reentry_lock:
             locked_dir = self._reentry_lock[symbol]
             locked_at = self._reentry_lock_ts.get(symbol)
@@ -268,6 +272,7 @@ class PositionManager:
 
             if new_candle_formed:
                 self._reentry_lock.pop(symbol, None)
+                self._just_unlocked.add(symbol)  # block entry this bar only
                 self._dirty = True
 
 
@@ -292,6 +297,20 @@ class PositionManager:
         position = self.positions.get(symbol)
 
         if not position and signal != 0:
+
+            if symbol in self._just_unlocked:
+                _tg_debug(
+                    f"[ENTRY BLOCKED — JUST UNLOCKED] {symbol} "
+                    f"dir={signal} bar={current_ts}"
+                )
+                return {"state": "FLAT"}
+
+            if symbol in self._just_unlocked:
+                _tg_debug(
+                    f"[ENTRY BLOCKED — JUST UNLOCKED] {symbol} "
+                    f"dir={signal} bar={current_ts}"
+                )
+                return {"state": "FLAT"}
 
             if symbol in self._reentry_lock:
                 locked_dir = self._reentry_lock[symbol]
@@ -336,7 +355,11 @@ class PositionManager:
                 f"total_executed={len(self._executed_signals)}"
             )
 
-            entry_price = float(external_row["open"])
+            # Use current 5m bar open as fill price.
+            # external_row["open"] is the signal bar open — a price that
+            # existed before the signal condition (close > resistance) was true.
+            # current_5m_row["open"] is the first price available after confirmation.
+            entry_price = float(current_5m_row["open"])
 
             if atr is None or atr <= 0 or np.isnan(atr):
                 _tg_debug(
@@ -352,7 +375,7 @@ class PositionManager:
                 f"[PRE-OPEN] {symbol}\n"
                 f"signal={signal} atr={atr}\n"
                 f"current_ts={current_ts}\n"
-                f"entry_price_raw={float(external_row['open'])}\n"
+                f"entry_price_raw={float(current_5m_row['open'])}\n"
                 f"positions_before_open={list(self.positions.keys())}"
             )
 
