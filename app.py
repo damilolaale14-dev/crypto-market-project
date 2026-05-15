@@ -635,7 +635,7 @@ def debug_signal_test():
                 injected_htf=df_4h.copy(),
                 injected_lltf=df_5m_tick1,
                 notify_override=True,
-                injection_cursor=injection_cursor_tick1,
+                replay_cursor=injection_cursor_tick1,
             )
 
             # read cursor after tick 1
@@ -746,7 +746,7 @@ def debug_signal_test():
                 injected_htf=df_4h.copy(),
                 injected_lltf=df_5m_tick2,
                 notify_override=True,
-                injection_cursor=injection_cursor_tick2,
+                replay_cursor=injection_cursor_tick2,
             )
 
             cursor_after_tick2 = _read(cursor_path)
