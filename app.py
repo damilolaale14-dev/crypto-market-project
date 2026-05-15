@@ -583,15 +583,13 @@ def debug_signal_test():
                 df_1h_tick1.copy(), htf_clipped, live=True
             )
 
-            df_sig_tick1["HTF_QUALITY"]      = 1.0
-            df_sig_tick1["HTF_DIRECTION"]    = 1
-            df_sig_tick1["COMPRESSION_OK"]   = True
-            df_sig_tick1["COMPRESSION_BARS"] = 10
-            df_sig_tick1["VALID_BREAK_LONG"] = True
-            df_sig_tick1["EARLY_EXPANSION"]  = True
-            df_sig_tick1["ENTRY_LONG"]       = True
-            df_sig_tick1["signal"]           = 1
-            df_sig_tick1["final_signal"]     = 1
+            for col, val in [
+                ("HTF_QUALITY", 1.0), ("HTF_DIRECTION", 1),
+                ("COMPRESSION_OK", True), ("COMPRESSION_BARS", 10),
+                ("VALID_BREAK_LONG", True), ("EARLY_EXPANSION", True),
+                ("ENTRY_LONG", True), ("signal", 1), ("final_signal", 1),
+            ]:
+                df_sig_tick1[col] = pd.Series(val, index=df_sig_tick1.index)
 
             # ── 10. Clear blocking state before tick 1 ─────────────
             if os.path.exists(reentry_lock_path):
