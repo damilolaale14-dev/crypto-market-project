@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, FIL, LINK, ATOM, OP, FXS, LTC, SNX, CRV, RUNE
 # ==========================================================
 
-SYMBOL = "TRXUSDT"
+SYMBOL = "ZENUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
