@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, AXS, ORDI, LDO, FIL, LINK, ATOM, OP, FXS, LTC, SNX, CRV, RUNE
 # ==========================================================
 
-SYMBOL = "ZENUSDT"
+SYMBOL = "BTCUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -112,9 +112,20 @@ LEVERAGE = 1
 # LTF_LIMIT = 2000   # ~30 days of 1h candles
 # HTF_LIMIT = 500   # ~120 days of 4h candles
 
-LLTF_LIMIT = 12000
-LTF_LIMIT = 1000   # ~30 days of 1h candles
-HTF_LIMIT = 250   # ~120 days of 4h candles
+# Evaluation window (how much you want to actually backtest)
+HTF_EVAL  = 250    # 4h candles to trade on
+LTF_EVAL  = HTF_EVAL * 4    # = 1000 1h candles
+LLTF_EVAL = LTF_EVAL * 12   # = 12000 5m candles
+
+# Warmup window (extra history for indicator calibration — discarded after signal gen)
+HTF_WARMUP  = 500
+LTF_WARMUP  = HTF_WARMUP * 4
+LLTF_WARMUP = LTF_WARMUP * 12
+
+# Total fetch limits
+HTF_LIMIT  = HTF_EVAL  + HTF_WARMUP   # = 750
+LTF_LIMIT  = LTF_EVAL  + LTF_WARMUP   # = 3000
+LLTF_LIMIT = LLTF_EVAL + LLTF_WARMUP  # = 60000
 
 # LLTF_LIMIT = 6000
 # LTF_LIMIT = 500   # ~30 days of 1h candles
@@ -144,9 +155,24 @@ htf_df.index = pd.to_datetime(htf_df.index, utc=True)
 
 # ==========================================================
 # SIGNAL GENERATION
+# Run on FULL history so hybrid_zscore anchors are properly
+# calibrated — same depth of history that live has.
+# Then trim to eval window before backtesting.
 # ==========================================================
 
-ltf_df = generate_signal(ltf_df, htf_df)
+ltf_df  = generate_signal(ltf_df, htf_df)
+
+# Trim to eval window AFTER signal generation
+eval_start_htf  = htf_df.index[-HTF_EVAL]
+eval_start_ltf  = ltf_df.index[-LTF_EVAL]
+eval_start_lltf = lltf_df.index[-LLTF_EVAL]
+
+htf_df   = htf_df[htf_df.index   >= eval_start_htf].copy()
+ltf_df   = ltf_df[ltf_df.index   >= eval_start_ltf].copy()
+lltf_df  = lltf_df[lltf_df.index >= eval_start_lltf].copy()
+
+print(f"[WARMUP TRIMMED] HTF: {len(htf_df)} bars | LTF: {len(ltf_df)} bars | LLTF: {len(lltf_df)} bars")
+print(f"[EVAL WINDOW] {ltf_df.index[0]} → {ltf_df.index[-1]}")
 
 # ==========================================================
 # BACKTEST
@@ -175,6 +201,36 @@ print("HTF candles (4h):", len(htf_df))
 # ==========================================================
 
 diagnostics_df = diagnose_trades(trade_log)
+
+# ==========================================================
+# HTF QUALITY DIAGNOSTIC — last 30 hours
+# ==========================================================
+print("\n=== HTF QUALITY (last 30 bars) ===")
+print(f"{'timestamp':>25} {'HTF_DIR':>8} {'HTF_QUAL':>10} {'signal':>8} {'final_sig':>10}")
+print("-" * 65)
+
+diag_cols = ["HTF_DIRECTION", "HTF_QUALITY", "signal", "final_signal"]
+available = [c for c in diag_cols if c in ltf_df.columns]
+
+diag = ltf_df[available].tail(30)
+
+for ts, row in diag.iterrows():
+    htf_dir  = int(row["HTF_DIRECTION"])  if "HTF_DIRECTION"  in row.index else "N/A"
+    htf_qual = f"{row['HTF_QUALITY']:.4f}" if "HTF_QUALITY"    in row.index else "N/A"
+    sig      = int(row["signal"])          if "signal"          in row.index else "N/A"
+    fsig     = int(row["final_signal"])    if "final_signal"    in row.index else "N/A"
+
+    import pytz
+    WAT = pytz.timezone("Africa/Lagos")
+    ts_wat = ts.tz_convert(WAT).strftime("%Y-%m-%d %H:%M WAT")
+
+    blocked = " ← BLOCKED" if (htf_qual != "N/A" and float(htf_qual) <= 0.45) else ""
+    print(f"{ts_wat:>25} {str(htf_dir):>8} {htf_qual:>10} {str(sig):>8} {str(fsig):>10}{blocked}")
+
+print(f"\nHTF threshold: 0.45")
+print(f"Last HTF_DIRECTION : {int(ltf_df['HTF_DIRECTION'].iloc[-1])}")
+print(f"Last HTF_QUALITY   : {ltf_df['HTF_QUALITY'].iloc[-1]:.4f}")
+print(f"Last final_signal  : {int(ltf_df['final_signal'].iloc[-1])}")
 
 # # ── 5m candle dump per trade ────────────────────────────────
 # print("\n=== 5M CANDLES PER TRADE ===")

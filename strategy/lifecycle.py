@@ -335,9 +335,8 @@ class PositionManager:
 
             signal_id = (
                 symbol + "|" +
-                str(signal_ts) + "|" +
-                str(signal) + "|" +
-                str(external_row.name)
+                str(external_row.name) + "|" +
+                str(signal)
             )
 
             if signal_id in self._executed_signals:
