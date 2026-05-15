@@ -136,7 +136,7 @@ LLTF_LIMIT = LLTF_EVAL + LLTF_WARMUP  # = 60000
 # ==========================================================
 
 print("Downloading LLTF data (5m)...")
-lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
+# lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
 
 print("Downloading LTF data (1h)...")
 ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
@@ -144,7 +144,9 @@ ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
 print("Downloading HTF data (4h)...")
 htf_df = fetch_binance(SYMBOL, HTF_INTERVAL, HTF_LIMIT)
 
-lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
+print(f"[DEBUG] backtest htf_df last={htf_df.index[-1]} len={len(htf_df)}")
+
+# lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
 ltf_df.index = pd.to_datetime(ltf_df.index, utc=True)
 htf_df.index = pd.to_datetime(htf_df.index, utc=True)
 
@@ -160,25 +162,25 @@ htf_df.index = pd.to_datetime(htf_df.index, utc=True)
 # Then trim to eval window before backtesting.
 # ==========================================================
 
-ltf_df  = generate_signal(ltf_df, htf_df)
+ltf_df  = generate_signal(ltf_df, htf_df, as_of=ltf_df.index[-1])
 
 # Trim to eval window AFTER signal generation
 eval_start_htf  = htf_df.index[-HTF_EVAL]
 eval_start_ltf  = ltf_df.index[-LTF_EVAL]
-eval_start_lltf = lltf_df.index[-LLTF_EVAL]
+# eval_start_lltf = lltf_df.index[-LLTF_EVAL]
 
 htf_df   = htf_df[htf_df.index   >= eval_start_htf].copy()
 ltf_df   = ltf_df[ltf_df.index   >= eval_start_ltf].copy()
-lltf_df  = lltf_df[lltf_df.index >= eval_start_lltf].copy()
+# lltf_df  = lltf_df[lltf_df.index >= eval_start_lltf].copy()
 
-print(f"[WARMUP TRIMMED] HTF: {len(htf_df)} bars | LTF: {len(ltf_df)} bars | LLTF: {len(lltf_df)} bars")
+print(f"[WARMUP TRIMMED] HTF: {len(htf_df)} bars | LTF: {len(ltf_df)} bars ") #| LLTF: {len(lltf_df)} bars")
 print(f"[EVAL WINDOW] {ltf_df.index[0]} → {ltf_df.index[-1]}")
 
 # ==========================================================
 # BACKTEST
 # ==========================================================
 
-backtester = SignalBacktester(ltf_df, htf_df=htf_df, lltf_df=lltf_df, leverage=LEVERAGE)
+backtester = SignalBacktester(ltf_df, htf_df=htf_df, leverage=LEVERAGE)
 
 backtest_output = backtester.run()
 

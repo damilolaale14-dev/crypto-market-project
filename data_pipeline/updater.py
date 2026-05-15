@@ -294,6 +294,8 @@ def update_symbol(symbol: str):
     df_htf = df_htf.iloc[-HOURS_LOOKBACK:]
     validate_ohlcv(df_htf, symbol, freq=HTF_INTERVAL)
 
+    print(f"[DEBUG] live htf_df last={df_htf.index[-1]} len={len(df_htf)}")
+
     # Final clean + validation
     if df_htf is not None:
         df_htf = df_htf.sort_index()

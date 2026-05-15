@@ -1417,12 +1417,18 @@ def atr_acceleration(df, fast=5, slow=20):
 # ==========================================================
 # INTEGRATE INTO SIGNAL GENERATION
 # ==========================================================
-def generate_signal(df, htf_df, atr_mult=1.5, live=False):
+def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None):
     if df.empty:
         return df
 
-    now_hour = pd.Timestamp.now(tz="UTC").floor("h")
-    htf_df = htf_df[htf_df.index < now_hour].copy()
+    if as_of is not None:
+        cutoff = pd.Timestamp(as_of).tz_convert("UTC") if pd.Timestamp(as_of).tzinfo else pd.Timestamp(as_of).tz_localize("UTC")
+    else:
+        cutoff = pd.Timestamp.now(tz="UTC").floor("h")
+
+    htf_df = htf_df[htf_df.index < cutoff].copy()
+
+    print(f"[DEBUG] generate_signal htf_df last={htf_df.index[-1] if not htf_df.empty else 'EMPTY'} len={len(htf_df)}")
 
     if df.empty or htf_df.empty:
         return df
