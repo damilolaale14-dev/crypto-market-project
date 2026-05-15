@@ -673,15 +673,13 @@ def debug_signal_test():
                 df_1h_tick2.copy(), htf_clipped, live=True
             )
 
-            df_sig_tick2["HTF_QUALITY"]      = 1.0
-            df_sig_tick2["HTF_DIRECTION"]    = 1
-            df_sig_tick2["COMPRESSION_OK"]   = True
-            df_sig_tick2["COMPRESSION_BARS"] = 10
-            df_sig_tick2["VALID_BREAK_LONG"] = True
-            df_sig_tick2["EARLY_EXPANSION"]  = True
-            df_sig_tick2["ENTRY_LONG"]       = True
-            df_sig_tick2["signal"]           = 1
-            df_sig_tick2["final_signal"]     = 1
+            for col, val in [
+                ("HTF_QUALITY", 1.0), ("HTF_DIRECTION", 1),
+                ("COMPRESSION_OK", True), ("COMPRESSION_BARS", 10),
+                ("VALID_BREAK_LONG", True), ("EARLY_EXPANSION", True),
+                ("ENTRY_LONG", True), ("signal", 1), ("final_signal", 1),
+            ]:
+                df_sig_tick2[col] = pd.Series(val, index=df_sig_tick2.index)
 
             # cursor for tick 2 = end of bar A 5M window
             # runner should only see bar B 5M bars as new
