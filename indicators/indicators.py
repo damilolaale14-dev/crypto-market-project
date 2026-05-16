@@ -1395,7 +1395,7 @@ def atr_acceleration(df, fast=5, slow=20):
 # ==========================================================
 # INTEGRATE INTO SIGNAL GENERATION
 # ==========================================================
-def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None):
+def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"):
     if df.empty:
         return df
 

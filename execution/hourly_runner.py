@@ -305,7 +305,7 @@ def run_hourly_for_symbol(
         # -------------------
         # GENERATE & MAP SIGNALS
         # -------------------
-        df = generate_signal(df.copy(), htf_df.copy(), live=is_live)
+        df = generate_signal(df.copy(), htf_df.copy(), live=is_live, symbol=symbol)
 
         _htf_quality   = float(df['HTF_QUALITY'].iloc[-1])
         _htf_direction = int(df['HTF_DIRECTION'].iloc[-1])
