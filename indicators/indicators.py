@@ -430,19 +430,19 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
 
     df['VALID_BREAK_LONG'] = (
         # compression_ok &
-        df['EARLY_EXPANSION'] 
+        df['EARLY_EXPANSION'] &
         # (df['IGNITION_OK'] |
         # df['CONTINUATION_OK']) 
-        # df['PRESSURE_ELEVATED_LONG'] &
+        df['PRESSURE_ELEVATED_LONG'] 
         # (df['COMPOSITE_PRESSURE'] > 0) 
     )
 
     df['VALID_BREAK_SHORT'] = (
         # compression_ok &
-        df['EARLY_EXPANSION'] 
+        df['EARLY_EXPANSION'] &
         # (df['IGNITION_OK'] |
         # df['CONTINUATION_OK']) 
-        # df['PRESSURE_ELEVATED_SHORT'] &
+        df['PRESSURE_ELEVATED_SHORT'] 
         # (df['COMPOSITE_PRESSURE'] < 0) 
     )
 
@@ -1595,8 +1595,8 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None):
         # df['BREAKOUT_HEALTH_SHORT']
     )
 
-    # LONG_CONDITION &= df['ENTRY_LONG']
-    # SHORT_CONDITION &= df['ENTRY_SHORT']
+    LONG_CONDITION &= df['ENTRY_LONG']
+    SHORT_CONDITION &= df['ENTRY_SHORT']
 
     LONG_CONDITION &= HTF_LONG_OK
     SHORT_CONDITION &= HTF_SHORT_OK
