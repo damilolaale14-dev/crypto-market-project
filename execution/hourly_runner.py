@@ -307,7 +307,7 @@ def run_hourly_for_symbol(
         # -------------------
         df = generate_signal(df.copy(), htf_df.copy(), live=is_live)
 
-        _htf_quality   = float(df['HTF_QUALITY_SCORE'].iloc[-1])
+        _htf_quality   = float(df['HTF_QUALITY'].iloc[-1])
         _htf_direction = int(df['HTF_DIRECTION'].iloc[-1])
         _signal_count  = int((df['final_signal'] != 0).sum())
 
