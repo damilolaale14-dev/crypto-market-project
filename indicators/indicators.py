@@ -1605,36 +1605,22 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None):
     df.loc[LONG_CONDITION, 'signal'] = 1
     df.loc[SHORT_CONDITION, 'signal'] = -1
 
-    # ── FILTER AUDIT (last bar snapshot) ──────────────────────────
-    _last = df.iloc[-1]
-    _ts   = df.index[-1]
-
-    def _b(val):
-        return "✅" if bool(val) else "❌"
-
+    # ── FILTER AUDIT ──────────────────────────────────────────────
     try:
         from execution.notifier import TelegramNotifier
+        _last = df.iloc[-1]
+        _b = lambda val: "✅" if bool(val) else "❌"
         TelegramNotifier().debug(
-            f"🔬 *FILTER AUDIT* `{_ts}`\n"
-            f"\n*HTF*\n"
-            f"  direction={int(_last['HTF_DIRECTION'])} quality={float(_last['HTF_QUALITY']):.4f} threshold=0.45\n"
-            f"  HTF_LONG_OK={_b(HTF_LONG_OK.iloc[-1])}  HTF_SHORT_OK={_b(HTF_SHORT_OK.iloc[-1])}\n"
-            f"\n*Expansion*\n"
-            f"  EARLY_EXPANSION={_b(_last['EARLY_EXPANSION'])}  maturity={float(_last['EXPANSION_MATURITY']):.4f}\n"
-            f"  VOL_STATE={int(_last['VOL_STATE'])}  VER={float(_last['VER']):.4f}\n"
-            f"\n*Pressure*\n"
-            f"  PRESSURE_ELEVATED_LONG={_b(_last['PRESSURE_ELEVATED_LONG'])}  PRESSURE_ELEVATED_SHORT={_b(_last['PRESSURE_ELEVATED_SHORT'])}\n"
-            f"  COMPOSITE_PRESSURE={float(_last['COMPOSITE_PRESSURE']):.4f}  FLOW_STRENGTH={float(_last['FLOW_STRENGTH']):.4f}\n"
-            f"\n*Entry gates*\n"
-            f"  ENTRY_LONG={_b(_last['ENTRY_LONG'])}  ENTRY_SHORT={_b(_last['ENTRY_SHORT'])}\n"
-            f"  COMPRESSION_OK={_b(_last['COMPRESSION_OK'])}  compression_score={float(_last['COMPRESSION_SCORE']):.4f}\n"
-            f"  VALID_BREAK_LONG={_b(_last['VALID_BREAK_LONG'])}  VALID_BREAK_SHORT={_b(_last['VALID_BREAK_SHORT'])}\n"
-            f"\n*Final*\n"
-            f"  LONG={_b(LONG_CONDITION.iloc[-1])}  SHORT={_b(SHORT_CONDITION.iloc[-1])}\n"
-            f"  final_signal={int(_last['signal'])}"
+            f"🔬 *FILTER AUDIT* `{symbol}`\n"
+            f"HTF quality={float(_last['HTF_QUALITY']):.4f} dir={int(_last['HTF_DIRECTION'])}\n"
+            f"HTF_LONG={_b(HTF_LONG_OK.iloc[-1])}  HTF_SHORT={_b(HTF_SHORT_OK.iloc[-1])}\n"
+            f"EARLY_EXPANSION={_b(_last['EARLY_EXPANSION'])}\n"
+            f"PRESSURE_LONG={_b(_last['PRESSURE_ELEVATED_LONG'])}  PRESSURE_SHORT={_b(_last['PRESSURE_ELEVATED_SHORT'])}\n"
+            f"ENTRY_LONG={_b(_last['ENTRY_LONG'])}  ENTRY_SHORT={_b(_last['ENTRY_SHORT'])}"
         )
     except Exception:
         pass
+    # ── END FILTER AUDIT ──────────────────────────────────────────
 
     if live:
         df['final_signal'] = df['signal'].fillna(0).astype(int)

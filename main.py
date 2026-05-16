@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC, ZEN, AVAX, RUNE, ORDI, LDO, FIL, LINK, PENDLE
 # ==========================================================
 
-SYMBOL = "AVAXUSDT"
+SYMBOL = "BTCUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
