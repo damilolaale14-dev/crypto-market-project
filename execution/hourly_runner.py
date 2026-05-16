@@ -20,8 +20,8 @@ def _tg_debug(msg: str) -> None:
 
 SYMBOLS = [
     "ETHUSDT", "FILUSDT", "TRXUSDT", "VETUSDT", "UNIUSDT", "DOGEUSDT", "ETCUSDT",
-    "AAVEUSDT", "BCHUSDT", "BANDUSDT", "TIAUSDT", "XLMUSDT", "SUIUSDT", "BTCUSDT",
-    "ZENUSDT", "AVAXUSDT", "AXSUSDT", "ORDIUSDT", "LDOUSDT", "LINKUSDT"
+    "AAVEUSDT", "BCHUSDT", "OPUSDT", "TIAUSDT", "XLMUSDT", "SUIUSDT", "BTCUSDT",
+    "ZENUSDT", "AVAXUSDT", "RUNEUSDT", "ORDIUSDT", "LDOUSDT", "LINKUSDT", "PENDLEUSDT"
 ]
 
 SIGNAL_STORE       = "data/signals.json"
@@ -427,13 +427,13 @@ def run_hourly_for_symbol(
         # Without this, zero signals from a blocked HTF filter is
         # indistinguishable from zero signals from no setups.
         # new_hour guard fires once per hour per symbol, not every cron run.
-        if _htf_quality <= 0.45 and new_hour:
-            notifier.debug(
-                f"[HTF BLOCKED] {symbol} | "
-                f"quality={_htf_quality:.4f} threshold=0.45 | "
-                f"dir={_htf_direction} | "
-                f"no signals will fire this hour"
-            )
+        # if _htf_quality <= 0.45 and new_hour:
+        #     notifier.debug(
+        #         f"[HTF BLOCKED] {symbol} | "
+        #         f"quality={_htf_quality:.4f} threshold=0.45 | "
+        #         f"dir={_htf_direction} | "
+        #         f"no signals will fire this hour"
+        #     )
 
         # =========================
         # STREAMING ENGINE

@@ -289,19 +289,18 @@ def update_symbol(symbol: str):
     if df_htf is None or df_htf.empty:
         raise RuntimeError(f"[{symbol}] No HTF data available after fetch")
 
+    # Only keep closed 4H bars — a 4H bar is closed when the NEXT 4H boundary has passed.
+    # Example: bar that opened at 16:00 is not closed until 20:00 has arrived.
+    # now_hour is already floored to the current UTC hour.
+    last_closed_4h = now_hour - timedelta(hours=now_hour.hour % 4 or 4)
+
     df_htf = df_htf.sort_index()
     df_htf = df_htf[df_htf.index >= start_required]
+    df_htf = df_htf[df_htf.index <= last_closed_4h - timedelta(hours=4)]
     df_htf = df_htf.iloc[-HOURS_LOOKBACK:]
     validate_ohlcv(df_htf, symbol, freq=HTF_INTERVAL)
 
-    print(f"[DEBUG] live htf_df last={df_htf.index[-1]} len={len(df_htf)}")
-
-    # Final clean + validation
-    if df_htf is not None:
-        df_htf = df_htf.sort_index()
-        df_htf = df_htf[df_htf.index >= start_required]
-        df_htf = df_htf.iloc[-HOURS_LOOKBACK:]  # keep consistent history
-        validate_ohlcv(df_htf, symbol, freq=HTF_INTERVAL)
+    print(f"[DEBUG] live htf_df last={df_htf.index[-1]} len={len(df_htf)} last_closed_4h={last_closed_4h}")
 
     print("[HTF] candles:", len(df_htf))
 

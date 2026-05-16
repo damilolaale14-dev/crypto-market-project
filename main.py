@@ -63,7 +63,7 @@ def fetch_binance(symbol, interval, limit):
 
     df = df[["open_time", "open", "high", "low", "close", "volume", "taker_buy_base"]]
 
-    df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms")
+    df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     df = df.drop(columns=["open_time"])
     df = df.set_index("timestamp")
     df = df.astype(float)
@@ -72,11 +72,11 @@ def fetch_binance(symbol, interval, limit):
 
 
 # ==========================================================
-# CONFIG ETH, TRX, VET, UNI, DOGE, ETC, AAVE, BCH, BAND, TIA, XLM, SUI, PENDLE
-# BTC, ZEN, AVAX, AXS, ORDI, LDO, FIL, LINK, ATOM, OP, FXS, LTC, SNX, CRV, RUNE
+# CONFIG ETH, TRX, VET, UNI, DOGE, ETC, AAVE, BCH, OP, TIA, XLM, SUI,
+# BTC, ZEN, AVAX, RUNE, ORDI, LDO, FIL, LINK, PENDLE
 # ==========================================================
 
-SYMBOL = "ORDIUSDT"
+SYMBOL = "BTCUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -97,9 +97,9 @@ LEVERAGE = 1
 # LTF_LIMIT = 26280   # ~30 days of 1h candles
 # HTF_LIMIT = 6570   # ~120 days of 4h candles
 
-LLTF_LIMIT = 210240
-LTF_LIMIT = 17520   # ~30 days of 1h candles
-HTF_LIMIT = 4380   # ~120 days of 4h candles
+# LLTF_LIMIT = 210240
+# LTF_LIMIT = 17520   # ~30 days of 1h candles
+# HTF_LIMIT = 4380   # ~120 days of 4h candles
 
 # LTF_LIMIT = 8760   # ~30 days of 1h candles
 # HTF_LIMIT = 2190   # ~120 days of 4h candles
@@ -112,9 +112,9 @@ HTF_LIMIT = 4380   # ~120 days of 4h candles
 # LTF_LIMIT = 2000   # ~30 days of 1h candles
 # HTF_LIMIT = 500   # ~120 days of 4h candles
 
-# LLTF_LIMIT = 12000
-# LTF_LIMIT = 1000   # ~30 days of 1h candles
-# HTF_LIMIT = 250   # ~120 days of 4h candles
+LLTF_LIMIT = 12000
+LTF_LIMIT = 1000   # ~30 days of 1h candles
+HTF_LIMIT = 250   # ~120 days of 4h candles
 
 # LLTF_LIMIT = 6000
 # LTF_LIMIT = 500   # ~30 days of 1h candles
@@ -125,7 +125,7 @@ HTF_LIMIT = 4380   # ~120 days of 4h candles
 # ==========================================================
 
 print("Downloading LLTF data (5m)...")
-lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
+# lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
 
 print("Downloading LTF data (1h)...")
 ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
@@ -133,7 +133,18 @@ ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
 print("Downloading HTF data (4h)...")
 htf_df = fetch_binance(SYMBOL, HTF_INTERVAL, HTF_LIMIT)
 
-lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
+# Drop the current incomplete 4H bar — live does this too
+now_utc = pd.Timestamp.now(tz="UTC")
+
+# Drop current incomplete 1H bar
+current_1h_boundary = now_utc.floor("h")
+ltf_df = ltf_df[ltf_df.index < current_1h_boundary].copy()
+
+current_4h_boundary = now_utc.floor("4h")
+htf_df = htf_df[htf_df.index < current_4h_boundary].copy()
+print(f"[DEBUG] htf_df after incomplete bar drop: last={htf_df.index[-1]} len={len(htf_df)}")
+
+# lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
 ltf_df.index = pd.to_datetime(ltf_df.index, utc=True)
 htf_df.index = pd.to_datetime(htf_df.index, utc=True)
 
@@ -152,7 +163,7 @@ ltf_df = generate_signal(ltf_df, htf_df)
 # BACKTEST
 # ==========================================================
 
-backtester = SignalBacktester(ltf_df, htf_df=htf_df, lltf_df=lltf_df, leverage=LEVERAGE)
+backtester = SignalBacktester(ltf_df, htf_df=htf_df, leverage=LEVERAGE)
 
 backtest_output = backtester.run()
 
@@ -179,32 +190,32 @@ diagnostics_df = diagnose_trades(trade_log)
 # ==========================================================
 # HTF QUALITY DIAGNOSTIC — last 30 hours
 # ==========================================================
-# print("\n=== HTF QUALITY (last 30 bars) ===")
-# print(f"{'timestamp':>25} {'HTF_DIR':>8} {'HTF_QUAL':>10} {'signal':>8} {'final_sig':>10}")
-# print("-" * 65)
+print("\n=== HTF QUALITY (last 30 bars) ===")
+print(f"{'timestamp':>25} {'HTF_DIR':>8} {'HTF_QUAL':>10} {'signal':>8} {'final_sig':>10}")
+print("-" * 65)
 
-# diag_cols = ["HTF_DIRECTION", "HTF_QUALITY", "signal", "final_signal"]
-# available = [c for c in diag_cols if c in ltf_df.columns]
+diag_cols = ["HTF_DIRECTION", "HTF_QUALITY", "signal", "final_signal"]
+available = [c for c in diag_cols if c in ltf_df.columns]
 
-# diag = ltf_df[available].tail(30)
+diag = ltf_df[available].tail(30)
 
-# for ts, row in diag.iterrows():
-#     htf_dir  = int(row["HTF_DIRECTION"])  if "HTF_DIRECTION"  in row.index else "N/A"
-#     htf_qual = f"{row['HTF_QUALITY']:.4f}" if "HTF_QUALITY"    in row.index else "N/A"
-#     sig      = int(row["signal"])          if "signal"          in row.index else "N/A"
-#     fsig     = int(row["final_signal"])    if "final_signal"    in row.index else "N/A"
+for ts, row in diag.iterrows():
+    htf_dir  = int(row["HTF_DIRECTION"])  if "HTF_DIRECTION"  in row.index else "N/A"
+    htf_qual = f"{row['HTF_QUALITY']:.4f}" if "HTF_QUALITY"    in row.index else "N/A"
+    sig      = int(row["signal"])          if "signal"          in row.index else "N/A"
+    fsig     = int(row["final_signal"])    if "final_signal"    in row.index else "N/A"
 
-#     import pytz
-#     WAT = pytz.timezone("Africa/Lagos")
-#     ts_wat = ts.tz_convert(WAT).strftime("%Y-%m-%d %H:%M WAT")
+    import pytz
+    WAT = pytz.timezone("Africa/Lagos")
+    ts_wat = ts.tz_convert(WAT).strftime("%Y-%m-%d %H:%M WAT")
 
-#     blocked = " ← BLOCKED" if (htf_qual != "N/A" and float(htf_qual) <= 0.45) else ""
-#     print(f"{ts_wat:>25} {str(htf_dir):>8} {htf_qual:>10} {str(sig):>8} {str(fsig):>10}{blocked}")
+    blocked = " ← BLOCKED" if (htf_qual != "N/A" and float(htf_qual) <= 0.45) else ""
+    print(f"{ts_wat:>25} {str(htf_dir):>8} {htf_qual:>10} {str(sig):>8} {str(fsig):>10}{blocked}")
 
-# print(f"\nHTF threshold: 0.45")
-# print(f"Last HTF_DIRECTION : {int(ltf_df['HTF_DIRECTION'].iloc[-1])}")
-# print(f"Last HTF_QUALITY   : {ltf_df['HTF_QUALITY'].iloc[-1]:.4f}")
-# print(f"Last final_signal  : {int(ltf_df['final_signal'].iloc[-1])}")
+print(f"\nHTF threshold: 0.45")
+print(f"Last HTF_DIRECTION : {int(ltf_df['HTF_DIRECTION'].iloc[-1])}")
+print(f"Last HTF_QUALITY   : {ltf_df['HTF_QUALITY'].iloc[-1]:.4f}")
+print(f"Last final_signal  : {int(ltf_df['final_signal'].iloc[-1])}")
 
 # # ── 5m candle dump per trade ────────────────────────────────
 # print("\n=== 5M CANDLES PER TRADE ===")
