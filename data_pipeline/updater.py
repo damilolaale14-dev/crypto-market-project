@@ -289,14 +289,18 @@ def update_symbol(symbol: str):
     if df_htf is None or df_htf.empty:
         raise RuntimeError(f"[{symbol}] No HTF data available after fetch")
 
-    # Only keep closed 4H bars — a 4H bar is closed when the NEXT 4H boundary has passed.
-    # Example: bar that opened at 16:00 is not closed until 20:00 has arrived.
-    # now_hour is already floored to the current UTC hour.
-    last_closed_4h = now_hour - timedelta(hours=now_hour.hour % 4 or 4)
+    # Only keep closed 4H bars.
+    # A 4H bar that opened at T is closed when now >= T + 4h.
+    # last_closed_4h = the open timestamp of the most recent fully closed 4H bar.
+    # Example: now_hour=21:00 → 21%4=1 → last_closed_4h = 21:00 - 1h - 4h = 16:00 ✓
+    # Example: now_hour=20:00 → 20%4=0 → last_closed_4h = 20:00 - 0h - 4h = 16:00 ✓
+    # The 16:00 bar closes exactly at 20:00 — we exclude it at the boundary to be safe.
+    hours_into_cycle = now_hour.hour % 4
+    last_closed_4h = now_hour - timedelta(hours=hours_into_cycle) - timedelta(hours=4)
 
     df_htf = df_htf.sort_index()
     df_htf = df_htf[df_htf.index >= start_required]
-    df_htf = df_htf[df_htf.index <= last_closed_4h - timedelta(hours=4)]
+    df_htf = df_htf[df_htf.index <= last_closed_4h]
     df_htf = df_htf.iloc[-HOURS_LOOKBACK:]
     validate_ohlcv(df_htf, symbol, freq=HTF_INTERVAL)
 
