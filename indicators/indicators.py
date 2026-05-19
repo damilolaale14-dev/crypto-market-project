@@ -1601,20 +1601,20 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     df.loc[SHORT_CONDITION, 'signal'] = -1
 
     # ── FILTER AUDIT ──────────────────────────────────────────────
-    try:
-        from execution.notifier import TelegramNotifier
-        _last = df.iloc[-1]
-        _b = lambda val: "✅" if bool(val) else "❌"
-        TelegramNotifier().debug(
-            f"🔬 *FILTER AUDIT* `{symbol}`\n"
-            f"HTF quality={float(_last['HTF_QUALITY']):.4f} dir={int(_last['HTF_DIRECTION'])}\n"
-            f"HTF_LONG={_b(HTF_LONG_OK.iloc[-1])}  HTF_SHORT={_b(HTF_SHORT_OK.iloc[-1])}\n"
-            f"EARLY_EXPANSION={_b(_last['EARLY_EXPANSION'])}\n"
-            f"PRESSURE_LONG={_b(_last['PRESSURE_ELEVATED_LONG'])}  PRESSURE_SHORT={_b(_last['PRESSURE_ELEVATED_SHORT'])}\n"
-            f"ENTRY_LONG={_b(_last['ENTRY_LONG'])}  ENTRY_SHORT={_b(_last['ENTRY_SHORT'])}"
-        )
-    except Exception:
-        pass
+    # try:
+    #     from execution.notifier import TelegramNotifier
+    #     _last = df.iloc[-1]
+    #     _b = lambda val: "✅" if bool(val) else "❌"
+    #     TelegramNotifier().debug(
+    #         f"🔬 *FILTER AUDIT* `{symbol}`\n"
+    #         f"HTF quality={float(_last['HTF_QUALITY']):.4f} dir={int(_last['HTF_DIRECTION'])}\n"
+    #         f"HTF_LONG={_b(HTF_LONG_OK.iloc[-1])}  HTF_SHORT={_b(HTF_SHORT_OK.iloc[-1])}\n"
+    #         f"EARLY_EXPANSION={_b(_last['EARLY_EXPANSION'])}\n"
+    #         f"PRESSURE_LONG={_b(_last['PRESSURE_ELEVATED_LONG'])}  PRESSURE_SHORT={_b(_last['PRESSURE_ELEVATED_SHORT'])}\n"
+    #         f"ENTRY_LONG={_b(_last['ENTRY_LONG'])}  ENTRY_SHORT={_b(_last['ENTRY_SHORT'])}"
+    #     )
+    # except Exception:
+    #     pass
     # ── END FILTER AUDIT ──────────────────────────────────────────
 
     if live:
