@@ -305,6 +305,13 @@ def run_hourly_for_symbol(
         # -------------------
         # GENERATE & MAP SIGNALS
         # -------------------
+        if not new_hour and symbol in pm.positions:
+            # no new 1H bar but position open — skip signal regen, use cached df
+            pass
+        elif not new_hour:
+            # no new 1H bar, no position — nothing to do
+            return None, replay_cursor
+
         df = generate_signal(df.copy(), htf_df.copy(), live=is_live, symbol=symbol)
 
         _htf_quality   = float(df['HTF_QUALITY'].iloc[-1])

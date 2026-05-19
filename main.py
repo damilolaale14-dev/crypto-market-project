@@ -72,11 +72,11 @@ def fetch_binance(symbol, interval, limit):
 
 
 # ==========================================================
-# CONFIG ETH, TRX, VET, UNI, DOGE, ETC, AAVE, BCH, OP, TIA, XLM, SUI,
-# BTC, ZEN, AVAX, RUNE, ORDI, LDO, FIL, LINK, PENDLE
+# CONFIG ETH, DOGE, BCH, OP, XLM, SUI, FIL, XLM
+# BTC, ZEN, AVAX, RUNE, ORDI, PENDLE, ADA
 # ==========================================================
 
-SYMBOL = "BTCUSDT"
+SYMBOL = "SOLUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -97,9 +97,9 @@ LEVERAGE = 1
 # LTF_LIMIT = 26280   # ~30 days of 1h candles
 # HTF_LIMIT = 6570   # ~120 days of 4h candles
 
-# LLTF_LIMIT = 210240
-# LTF_LIMIT = 17520   # ~30 days of 1h candles
-# HTF_LIMIT = 4380   # ~120 days of 4h candles
+LLTF_LIMIT = 210240
+LTF_LIMIT = 17520   # ~30 days of 1h candles
+HTF_LIMIT = 4380   # ~120 days of 4h candles
 
 # LTF_LIMIT = 8760   # ~30 days of 1h candles
 # HTF_LIMIT = 2190   # ~120 days of 4h candles
@@ -112,9 +112,9 @@ LEVERAGE = 1
 # LTF_LIMIT = 2000   # ~30 days of 1h candles
 # HTF_LIMIT = 500   # ~120 days of 4h candles
 
-LLTF_LIMIT = 12000
-LTF_LIMIT = 1000   # ~30 days of 1h candles
-HTF_LIMIT = 250   # ~120 days of 4h candles
+# LLTF_LIMIT = 12000
+# LTF_LIMIT = 1000   # ~30 days of 1h candles
+# HTF_LIMIT = 250   # ~120 days of 4h candles
 
 # LLTF_LIMIT = 6000
 # LTF_LIMIT = 500   # ~30 days of 1h candles
@@ -124,24 +124,132 @@ HTF_LIMIT = 250   # ~120 days of 4h candles
 # FETCH DATA
 # ==========================================================
 
-print("Downloading LLTF data (5m)...")
-# lltf_df = fetch_binance(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT)
-
-print("Downloading LTF data (1h)...")
-ltf_df = fetch_binance(SYMBOL, LTF_INTERVAL, LTF_LIMIT)
-
-print("Downloading HTF data (4h)...")
-htf_df = fetch_binance(SYMBOL, HTF_INTERVAL, HTF_LIMIT)
-
-# Drop the current incomplete 4H bar — live does this too
 now_utc = pd.Timestamp.now(tz="UTC")
+
+import os
+
+CACHE_DIR = "data/backtest_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+def load_or_fetch(symbol, interval, limit, now_utc):
+    path = os.path.join(CACHE_DIR, f"{symbol}_{interval}.parquet")
+
+    if os.path.exists(path):
+        cached = pd.read_parquet(path)
+        cached.index = pd.to_datetime(cached.index, utc=True)
+        cached = cached.sort_index()
+        last_ts = cached.index[-1]
+
+        # check if cache covers enough history for the requested limit
+        # if not, re-download from scratch
+        if len(cached) < limit * 0.95:
+            print(f"[CACHE] {symbol} {interval} — cache has {len(cached)} bars but {limit} requested, re-downloading...")
+            os.remove(path)
+            df = fetch_binance(symbol, interval, limit)
+            df.to_parquet(path)
+            print(f"[CACHE] {symbol} {interval} — saved {len(df)} bars")
+            return df
+
+        # determine fetch start based on interval
+        if interval == "1h":
+            fetch_start = last_ts + pd.Timedelta(hours=1)
+            fetch_end = now_utc.floor("h") - pd.Timedelta(hours=1)
+        elif interval == "4h":
+            fetch_start = last_ts + pd.Timedelta(hours=4)
+            fetch_end = now_utc
+        elif interval == "5m":
+            fetch_start = last_ts + pd.Timedelta(minutes=5)
+            fetch_end = now_utc
+        else:
+            fetch_start = last_ts + pd.Timedelta(hours=1)
+            fetch_end = now_utc
+
+        if fetch_start <= fetch_end:
+            print(f"[CACHE] {symbol} {interval} — fetching new bars from {fetch_start} to {fetch_end}")
+            new_data = fetch_binance_range(symbol, interval, fetch_start, fetch_end)
+            if not new_data.empty:
+                combined = pd.concat([cached, new_data])
+                combined = combined[~combined.index.duplicated(keep="last")]
+                combined = combined.sort_index()
+                # trim to limit
+                combined = combined.iloc[-limit:]
+                combined.to_parquet(path)
+                print(f"[CACHE] {symbol} {interval} — updated, total bars: {len(combined)}")
+                return combined
+        else:
+            print(f"[CACHE] {symbol} {interval} — cache current, {len(cached)} bars")
+
+        return cached.iloc[-limit:]
+
+    else:
+        print(f"[CACHE] {symbol} {interval} — no cache, downloading {limit} bars...")
+        df = fetch_binance(symbol, interval, limit)
+        df.to_parquet(path)
+        print(f"[CACHE] {symbol} {interval} — saved {len(df)} bars")
+        return df
+
+def fetch_binance_range(symbol, interval, start, end):
+    """Fetch only bars between start and end timestamps."""
+    start_ms = int(start.timestamp() * 1000)
+    end_ms   = int(end.timestamp() * 1000)
+
+    all_data = []
+    current_end_ms = end_ms
+
+    while True:
+        params = {
+            "symbol":    symbol.replace("-", "").upper(),
+            "interval":  interval,
+            "limit":     1000,
+            "endTime":   current_end_ms,
+            "startTime": start_ms,
+        }
+        response = requests.get(BINANCE_URL, params=params)
+        data = response.json()
+
+        if not data or not isinstance(data, list):
+            break
+
+        all_data = data + all_data
+        oldest = data[0][0]
+
+        if oldest <= start_ms or len(data) < 1000:
+            break
+
+        current_end_ms = oldest - 1
+        time.sleep(0.25)
+
+    if not all_data:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_data, columns=[
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "quote_asset_volume", "num_trades",
+        "taker_buy_base", "taker_buy_quote", "ignore"
+    ])
+    df = df[["open_time", "open", "high", "low", "close", "volume", "taker_buy_base"]]
+    df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    df = df.drop(columns=["open_time"]).set_index("timestamp").astype(float)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    return df
+
+print("Loading LLTF data (5m)...")
+lltf_df = load_or_fetch(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT, now_utc)
+
+print("Loading LTF data (1h)...")
+ltf_df = load_or_fetch(SYMBOL, LTF_INTERVAL, LTF_LIMIT, now_utc)
+
+print("Loading HTF data (4h)...")
+htf_df = load_or_fetch(SYMBOL, HTF_INTERVAL, HTF_LIMIT, now_utc)
 
 # Drop current incomplete 1H bar
 current_1h_boundary = now_utc.floor("h")
-ltf_df = ltf_df[ltf_df.index < current_1h_boundary].copy()
+ltf_df = ltf_df[ltf_df.index <= current_1h_boundary - pd.Timedelta(hours=1)].copy()
 
-current_4h_boundary = now_utc.floor("4h")
-htf_df = htf_df[htf_df.index < current_4h_boundary].copy()
+hours_into_4h = now_utc.hour % 4
+last_closed_4h = now_utc.floor("h") - pd.Timedelta(hours=hours_into_4h) - pd.Timedelta(hours=4)
+current_4h_open = last_closed_4h + pd.Timedelta(hours=4)
+htf_df = htf_df[htf_df.index <= current_4h_open].copy()
 print(f"[DEBUG] htf_df after incomplete bar drop: last={htf_df.index[-1]} len={len(htf_df)}")
 
 # lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
@@ -163,7 +271,7 @@ ltf_df = generate_signal(ltf_df, htf_df)
 # BACKTEST
 # ==========================================================
 
-backtester = SignalBacktester(ltf_df, htf_df=htf_df, leverage=LEVERAGE)
+backtester = SignalBacktester(ltf_df, htf_df=htf_df, lltf_df=lltf_df, leverage=LEVERAGE)
 
 backtest_output = backtester.run()
 
@@ -197,7 +305,11 @@ print("-" * 65)
 diag_cols = ["HTF_DIRECTION", "HTF_QUALITY", "signal", "final_signal"]
 available = [c for c in diag_cols if c in ltf_df.columns]
 
-diag = ltf_df[available].tail(30)
+now_utc = pd.Timestamp.now(tz="UTC")
+last_closed_1h = now_utc.floor("h") - pd.Timedelta(hours=1)
+hours_into_4h = last_closed_1h.hour % 4
+last_closed_4h_boundary = last_closed_1h - pd.Timedelta(hours=hours_into_4h)
+diag = ltf_df[available][ltf_df.index <= last_closed_1h].tail(30)
 
 for ts, row in diag.iterrows():
     htf_dir  = int(row["HTF_DIRECTION"])  if "HTF_DIRECTION"  in row.index else "N/A"
@@ -209,7 +321,7 @@ for ts, row in diag.iterrows():
     WAT = pytz.timezone("Africa/Lagos")
     ts_wat = ts.tz_convert(WAT).strftime("%Y-%m-%d %H:%M WAT")
 
-    blocked = " ← BLOCKED" if (htf_qual != "N/A" and float(htf_qual) <= 0.45) else ""
+    blocked = " ← NO HTF DATA" if (htf_qual == "nan" or htf_qual == "N/A") else (" ← BLOCKED" if float(htf_qual) <= 0.45 else "")
     print(f"{ts_wat:>25} {str(htf_dir):>8} {htf_qual:>10} {str(sig):>8} {str(fsig):>10}{blocked}")
 
 print(f"\nHTF threshold: 0.45")

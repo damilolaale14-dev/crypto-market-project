@@ -429,20 +429,20 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     compression_ok = df['COMPRESSION_BARS'] >= 3
 
     df['VALID_BREAK_LONG'] = (
-        # compression_ok &
+        compression_ok &
         df['EARLY_EXPANSION'] &
-        # (df['IGNITION_OK'] |
+        df['IGNITION_OK'] 
         # df['CONTINUATION_OK']) 
-        df['PRESSURE_ELEVATED_LONG'] 
+        # df['PRESSURE_ELEVATED_LONG'] 
         # (df['COMPOSITE_PRESSURE'] > 0) 
     )
 
     df['VALID_BREAK_SHORT'] = (
-        # compression_ok &
+        compression_ok &
         df['EARLY_EXPANSION'] &
-        # (df['IGNITION_OK'] |
+        df['IGNITION_OK'] 
         # df['CONTINUATION_OK']) 
-        df['PRESSURE_ELEVATED_SHORT'] 
+        # df['PRESSURE_ELEVATED_SHORT'] 
         # (df['COMPOSITE_PRESSURE'] < 0) 
     )
 
@@ -868,10 +868,9 @@ def htf_structural_stack(df, htf_df,
     # ALIGN TO LTF
     # ======================================================
 
-    aligned = htf[[
-        'HTF_DIRECTION',
-        'HTF_QUALITY'
-    ]].reindex(df.index, method='ffill')
+    htf_aligned = htf[['HTF_DIRECTION', 'HTF_QUALITY']].shift(1)
+
+    aligned = htf_aligned.reindex(df.index, method='ffill')
 
     return aligned.fillna(0)
 
@@ -1401,10 +1400,8 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
 
     if as_of is not None:
         cutoff = pd.Timestamp(as_of).tz_convert("UTC") if pd.Timestamp(as_of).tzinfo else pd.Timestamp(as_of).tz_localize("UTC")
-    else:
-        cutoff = pd.Timestamp.now(tz="UTC").floor("h")
-
-    htf_df = htf_df[htf_df.index < cutoff].copy()
+        htf_df = htf_df[htf_df.index < cutoff].copy()
+    # else: trust the caller — htf_df is already correctly clipped
 
     print(f"[DEBUG] generate_signal htf_df last={htf_df.index[-1] if not htf_df.empty else 'EMPTY'} len={len(htf_df)}")
 
@@ -1586,13 +1583,11 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     df['ENTRY_LONG'] = (
         df['ENTRY_LONG'] &
         df['COMPRESSION_OK'] 
-        # df['BREAKOUT_HEALTH_LONG']
     )
 
     df['ENTRY_SHORT'] = (
         df['ENTRY_SHORT'] &
         df['COMPRESSION_OK'] 
-        # df['BREAKOUT_HEALTH_SHORT']
     )
 
     LONG_CONDITION &= df['ENTRY_LONG']

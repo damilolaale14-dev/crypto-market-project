@@ -122,7 +122,11 @@ def update_symbol(symbol: str):
                 df_htf  = pd.read_parquet(path_htf)
                 df_htf.index  = pd.to_datetime(df_htf.index,  utc=True)
                 df = df[df.index <= now_hour - timedelta(hours=1)]
-                df_htf = df_htf[df_htf.index <= now_hour - timedelta(hours=1)]
+                # include current open 4H bar as shift(1) landing pad
+                hours_into_cycle = now_hour.hour % 4
+                _last_closed_4h = now_hour - timedelta(hours=hours_into_cycle) - timedelta(hours=4)
+                _current_4h_open = _last_closed_4h + timedelta(hours=4)
+                df_htf = df_htf[df_htf.index <= _current_4h_open]
                 return df, df_htf, df_lltf
         except Exception as e:
             import pyarrow.lib as _pal
