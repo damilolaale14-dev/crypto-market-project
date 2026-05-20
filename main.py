@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC/, ZEN/, AVAX-, RUNE/, ORDI/, PENDLE/, ADA\, XRP/, TIA/, SOL/, MKR/, ETC/, TRB/
 # ==========================================================
 
-SYMBOL = "BANDUSDT"
+SYMBOL = "SUIUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"

@@ -849,10 +849,13 @@ def align_htf_scores(htf_scores, df, is_live=False):
     """
     Cheap alignment step — reindex precomputed HTF scores onto LTF index.
     Run this every hour. htf_scores comes from compute_htf_scores (cached).
+
+    No shift applied — lookahead prevention is handled upstream by excluding
+    the open 4H bar from htf_df before compute_htf_scores is called.
+    Shifting here would cause backtest to lag one full 4H bar behind live,
+    creating the quality divergence seen in Telegram vs backtest output.
     """
-    shift_n = 0 if is_live else 1
-    htf_shifted = htf_scores.shift(shift_n)
-    aligned = htf_shifted.reindex(df.index, method='ffill')
+    aligned = htf_scores.reindex(df.index, method='ffill')
     return aligned.fillna(0)
 
 
@@ -865,6 +868,9 @@ def htf_structural_stack(df, htf_df,
     """
     Backward-compatible wrapper. Used in backtest and anywhere a precomputed
     cache isn't available. Internally calls the split functions.
+
+    htf_df must already exclude the open 4H bar before being passed here —
+    that is the lookahead guard, not the shift inside align_htf_scores.
     """
     htf_scores = compute_htf_scores(
         htf_df,
@@ -872,7 +878,7 @@ def htf_structural_stack(df, htf_df,
         regime_window=regime_window,
         er_window=er_window,
     )
-    return align_htf_scores(htf_scores, df, is_live=is_live)
+    return align_htf_scores(htf_scores, df)
 
 # ==========================================================
 # VOLATILITY SHOCK DETECTOR
