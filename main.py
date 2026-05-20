@@ -72,7 +72,7 @@ def fetch_binance(symbol, interval, limit):
 
 
 # ==========================================================
-# CONFIG ETH-, EOS/, DOT//, ATOM-, AXS/, TRX\, DOGE-, BCH//, BAND/, XLM/, SUI//, FIL/, LINK/,
+# CONFIG ETH-, EOS/, DOT//, ATOM/, AXS/, TRX\, DOGE-, BCH//, BAND/, XLM/, SUI//, FIL/, LINK/,
 # BTC/, ZEN/, AVAX-, RUNE/, ORDI/, PENDLE/, ADA\, XRP/, TIA/, SOL/, MKR/, ETC/, TRB/
 # ==========================================================
 

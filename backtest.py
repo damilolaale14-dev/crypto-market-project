@@ -190,7 +190,8 @@ class SignalBacktester:
                 else:
                     close_to_stop_r = (stop - last.close) / R
 
-                if close_to_stop_r > 1.5:
+                mfe_r = trade.get("mfe_r", 0.0) if trade is not None else 0.0
+                if close_to_stop_r > 1.5 and mfe_r < 1.0:
                     return False
 
         # ══════════════════════════════════════════
