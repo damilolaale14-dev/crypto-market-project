@@ -225,7 +225,8 @@ class PositionManager:
             # Backtest: opposite_impulse again (labeled momentum_decay)
             # ===================================================
             if not skip_exit_checks:
-                self._update_dynamic_stop(position, trail_price, atr, side)
+                atr_for_trail = atr_5m if atr_5m and not pd.isna(atr_5m) and atr_5m > 0 else (atr * 0.20 if atr else None)
+                self._update_dynamic_stop(position, trail_price, atr_for_trail, side)
 
                 # if self._stealth_distribution_exit(window_5m, position, side):
                 #     try_exit("stealth_distrib", current_price)
@@ -549,7 +550,8 @@ class PositionManager:
             close_to_stop_r = (stop - last["close"]) / R
 
         # if close is still more than 1.5R from stop it's a pullback not a collapse
-        if close_to_stop_r > 1.5:
+        mfe_r = position.get("mfe_r", 0.0)
+        if close_to_stop_r > 1.5 and mfe_r < 1.0:
             return False
 
         # ══════════════════════════════════════════

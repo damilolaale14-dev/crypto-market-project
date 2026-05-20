@@ -72,11 +72,11 @@ def fetch_binance(symbol, interval, limit):
 
 
 # ==========================================================
-# CONFIG ETH, DOGE, BCH, OP, XLM, SUI, FIL, XLM
-# BTC, ZEN, AVAX, RUNE, ORDI, PENDLE, ADA, AXS
+# CONFIG ETH-, EOS/, DOT//, ATOM-, AXS/, TRX\, DOGE-, BCH//, BAND/, XLM/, SUI//, FIL/, LINK/,
+# BTC/, ZEN/, AVAX-, RUNE/, ORDI/, PENDLE/, ADA\, XRP/, TIA/, SOL/, MKR/, ETC/, TRB/
 # ==========================================================
 
-SYMBOL = "EOSUSDT"
+SYMBOL = "DOGEUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"

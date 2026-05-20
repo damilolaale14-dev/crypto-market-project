@@ -126,7 +126,7 @@ def update_symbol(symbol: str):
                 hours_into_cycle = now_hour.hour % 4
                 _last_closed_4h = now_hour - timedelta(hours=hours_into_cycle) - timedelta(hours=4)
                 _current_4h_open = _last_closed_4h + timedelta(hours=4)
-                df_htf = df_htf[df_htf.index <= _current_4h_open]
+                df_htf = df_htf[df_htf.index < _current_4h_open]
                 return df, df_htf, df_lltf
         except Exception as e:
             import pyarrow.lib as _pal
@@ -275,7 +275,7 @@ def update_symbol(symbol: str):
 
     # Determine fetch window
     htf_fetch_start = start_required if df_htf is None else last_htf_ts + timedelta(hours=4)
-    htf_fetch_end = now_hour + timedelta(hours=4)
+    htf_fetch_end = current_4h_open  # fetch up to but not including the open bar
 
     print("[FETCH HTF WINDOW]")
     print("start:", htf_fetch_start)
@@ -305,7 +305,7 @@ def update_symbol(symbol: str):
 
     df_htf = df_htf.sort_index()
     df_htf = df_htf[df_htf.index >= start_required]
-    df_htf = df_htf[df_htf.index <= current_4h_open]
+    df_htf = df_htf[df_htf.index < current_4h_open]  # exclude open bar — prevents HTF_QUALITY drift
     df_htf = df_htf.iloc[-HOURS_LOOKBACK:]
     validate_ohlcv(df_htf, symbol, freq=HTF_INTERVAL)
 

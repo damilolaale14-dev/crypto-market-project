@@ -427,11 +427,14 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     df = expansion_maturity(df)
     df = compression_detector(df)
     compression_ok = df['COMPRESSION_BARS'] >= 3
+    volume_confirmed = df['VOL_RATIO'] > 1.3
+
 
     df['VALID_BREAK_LONG'] = (
         compression_ok &
-        df['EARLY_EXPANSION'] &
-        df['IGNITION_OK'] 
+        # df['EARLY_EXPANSION'] 
+        # df['IGNITION_OK'] &
+        volume_confirmed
         # df['CONTINUATION_OK']) 
         # df['PRESSURE_ELEVATED_LONG'] 
         # (df['COMPOSITE_PRESSURE'] > 0) 
@@ -439,8 +442,9 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
 
     df['VALID_BREAK_SHORT'] = (
         compression_ok &
-        df['EARLY_EXPANSION'] &
-        df['IGNITION_OK'] 
+        # df['EARLY_EXPANSION'] 
+        # df['IGNITION_OK'] &
+        volume_confirmed
         # df['CONTINUATION_OK']) 
         # df['PRESSURE_ELEVATED_SHORT'] 
         # (df['COMPOSITE_PRESSURE'] < 0) 
@@ -1015,20 +1019,28 @@ def continuation_candle(df):
     return df
 
 def pullback_entry(df):
+    # Pullback = price retraced into the range but closed with momentum
+    # resuming in the breakout direction.
+    # BULL_CONT (close above prior high) contradicts a pullback — removed.
+    # Instead require: body is positive (bull close) for longs,
+    # negative (bear close) for shorts — momentum resuming after retrace.
 
-    ideal_pullback_long = df['PULLBACK_LONG'].between(0.2, 1.2)
-    ideal_pullback_short = df['PULLBACK_SHORT'].between(0.2, 1.2)
+    ideal_pullback_long = df['PULLBACK_LONG'].between(0.3, 1.5)
+    ideal_pullback_short = df['PULLBACK_SHORT'].between(0.3, 1.5)
+
+    bull_close = df['close'] > df['open']
+    bear_close = df['close'] < df['open']
 
     df['PBPE_PULLBACK_LONG'] = (
         df['BREAKOUT_WINDOW_LONG'] &
         ideal_pullback_long &
-        df['BULL_CONT']
+        bull_close
     )
 
     df['PBPE_PULLBACK_SHORT'] = (
         df['BREAKOUT_WINDOW_SHORT'] &
         ideal_pullback_short &
-        df['BEAR_CONT']
+        bear_close
     )
 
     return df
@@ -1068,8 +1080,8 @@ def delayed_continuation(df):
 def post_breakout_entry(df):
 
     # 1) breakout event windows
-    df['BREAKOUT_WINDOW_LONG']  = post_breakout_event_window(df['VALID_BREAK_LONG'])
-    df['BREAKOUT_WINDOW_SHORT'] = post_breakout_event_window(df['VALID_BREAK_SHORT'])
+    df['BREAKOUT_WINDOW_LONG']  = post_breakout_event_window(df['VALID_BREAK_LONG'], window=6)
+    df['BREAKOUT_WINDOW_SHORT'] = post_breakout_event_window(df['VALID_BREAK_SHORT'], window=6)
 
     # 2) compute metrics
     df = breakout_pullback_metrics(df)
@@ -1082,15 +1094,13 @@ def post_breakout_entry(df):
 
     # 4) final execution signal
     df['ENTRY_LONG'] = (
-        df['PBPE_PULLBACK_LONG'] |
-        df['PBPE_MICRO_LONG'] |
-        df['PBPE_DELAY_LONG']
+        df['PBPE_PULLBACK_LONG'] &
+        df['PBPE_MICRO_LONG']
     )
 
     df['ENTRY_SHORT'] = (
-        df['PBPE_PULLBACK_SHORT'] |
-        df['PBPE_MICRO_SHORT'] |
-        df['PBPE_DELAY_SHORT']
+        df['PBPE_PULLBACK_SHORT'] &
+        df['PBPE_MICRO_SHORT']
     )
 
     return df
@@ -1147,10 +1157,10 @@ def compression_context(df, lookback=7, memory=6):
         0.5 * recent_compression.astype(float) +
         0.5 * freshness
     ) * expansion_ok.astype(float)
-    df['COMPRESSION_SCORE'] *= df['FRESHNESS_SHORT']
+    df['COMPRESSION_SCORE'] *= df[['FRESHNESS_LONG', 'FRESHNESS_SHORT']].max(axis=1)
 
     # 5️⃣ Convert to permission (like HTF_OK)
-    df['COMPRESSION_OK'] = df['COMPRESSION_SCORE'] > 0.35
+    df['COMPRESSION_OK'] = df['COMPRESSION_SCORE'] > 0.50
 
     return df
 
@@ -1240,9 +1250,11 @@ def bars_since_event(event_series: pd.Series) -> pd.Series:
 # ==========================================================
 # ENTRY FRESHNESS ENGINE (NEW)
 # ==========================================================
-def entry_freshness(df, half_life=6):
+def entry_freshness(df, half_life=3):
+    # Half-life of 3 bars (3 hours at 1H). Signal is mostly dead by bar 6.
+    # No floor — stale signals die completely.
+    # DECAY_SPEED still modulates: high-vol regimes expire faster.
 
-    # Exponential decay of breakout relevance
     df['FRESHNESS_LONG'] = np.exp(
         -df['BARS_SINCE_LONG_BREAK'] /
         (half_life * df['DECAY_SPEED'])
@@ -1253,9 +1265,8 @@ def entry_freshness(df, half_life=6):
         (half_life * df['DECAY_SPEED'])
     )
 
-    # Late-entry soft floor (prevents total death)
-    df['FRESHNESS_LONG']  = df['FRESHNESS_LONG'].clip(lower=0.15)
-    df['FRESHNESS_SHORT'] = df['FRESHNESS_SHORT'].clip(lower=0.15)
+    # No floor — let signals die. A 0.15 floor on a stale signal
+    # keeps it alive through the compression_context score.
 
     return df
 
@@ -1391,6 +1402,29 @@ def atr_acceleration(df, fast=5, slow=20):
 
     return df
 
+def entry_location_filter(df, lookback=20):
+    """
+    Computes where current close sits within the N-bar range as a percentile.
+    Longs require entry below the 60th percentile (not chasing).
+    Shorts require entry above the 40th percentile (not chasing).
+    This is orthogonal to compression/expansion/ignition — it measures
+    entry location relative to recent structure, not breakout quality.
+    """
+    rolling_high = df['high'].rolling(lookback).max()
+    rolling_low  = df['low'].rolling(lookback).min()
+    rolling_range = rolling_high - rolling_low
+
+    # 0 = bottom of range, 1 = top of range
+    df['ENTRY_PERCENTILE'] = (df['close'] - rolling_low) / (rolling_range + 1e-9)
+
+    # Longs: not too extended to the upside
+    df['LOCATION_LONG_OK']  = df['ENTRY_PERCENTILE'] < 0.60
+
+    # Shorts: not too extended to the downside
+    df['LOCATION_SHORT_OK'] = df['ENTRY_PERCENTILE'] > 0.40
+
+    return df
+
 # ==========================================================
 # INTEGRATE INTO SIGNAL GENERATION
 # ==========================================================
@@ -1422,6 +1456,10 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     df = atr_acceleration(df)
     df = volatility_shock(df)
 
+    # 1H SuperTrend for LTF direction agreement filter
+    df = supertrend(df, period=10, multiplier=3)
+    df['LTF_DIRECTION'] = df['SUPERTREND']
+
     # =========================
     # STATE ENGINE
     # =========================
@@ -1440,6 +1478,7 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     df = temporal_phase_asymmetry(df)
     # --- Dynamic state analytics
     df = dynamic_state_engine(df)
+    df = entry_location_filter(df, lookback=20)
 
     # =========================
     # NEW HTF STRUCTURAL STACK
@@ -1453,12 +1492,14 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
 
     HTF_LONG_OK = (
         (df['HTF_DIRECTION'] == 1) &
-        (df['HTF_QUALITY'] > HTF_QUALITY_TH)
+        (df['HTF_QUALITY'] > HTF_QUALITY_TH) &
+        (df['LTF_DIRECTION'] == 1)   # 1H trend must agree with 4H
     )
 
     HTF_SHORT_OK = (
         (df['HTF_DIRECTION'] == -1) &
-        (df['HTF_QUALITY'] > HTF_QUALITY_TH)
+        (df['HTF_QUALITY'] > HTF_QUALITY_TH) &
+        (df['LTF_DIRECTION'] == -1)  # 1H trend must agree with 4H
     )
 
     # =========================
@@ -1581,12 +1622,12 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     SHORT_CONDITION = (df['VALID_BREAK_SHORT'])
 
     df['ENTRY_LONG'] = (
-        df['ENTRY_LONG'] &
+        df['ENTRY_LONG'] |
         df['COMPRESSION_OK'] 
     )
 
     df['ENTRY_SHORT'] = (
-        df['ENTRY_SHORT'] &
+        df['ENTRY_SHORT'] |
         df['COMPRESSION_OK'] 
     )
 
@@ -1595,6 +1636,9 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
 
     LONG_CONDITION &= HTF_LONG_OK
     SHORT_CONDITION &= HTF_SHORT_OK
+
+    LONG_CONDITION  &= df['LOCATION_LONG_OK']
+    SHORT_CONDITION &= df['LOCATION_SHORT_OK']
 
     df['signal'] = 0
     df.loc[LONG_CONDITION, 'signal'] = 1
