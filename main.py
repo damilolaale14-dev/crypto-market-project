@@ -76,7 +76,7 @@ def fetch_binance(symbol, interval, limit):
 # BTC/, ZEN/, AVAX-, RUNE/, ORDI/, PENDLE/, ADA\, XRP/, TIA/, SOL/, MKR/, ETC/, TRB/
 # ==========================================================
 
-SYMBOL = "AXSUSDT"
+SYMBOL = "BANDUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -249,7 +249,7 @@ ltf_df = ltf_df[ltf_df.index <= current_1h_boundary - pd.Timedelta(hours=1)].cop
 hours_into_4h = now_utc.hour % 4
 last_closed_4h = now_utc.floor("h") - pd.Timedelta(hours=hours_into_4h) - pd.Timedelta(hours=4)
 current_4h_open = last_closed_4h + pd.Timedelta(hours=4)
-htf_df = htf_df[htf_df.index <= current_4h_open].copy()
+htf_df = htf_df[htf_df.index < current_4h_open].copy()
 print(f"[DEBUG] htf_df after incomplete bar drop: last={htf_df.index[-1]} len={len(htf_df)}")
 
 # lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)

@@ -487,13 +487,13 @@ class PositionManager:
 
     def _opposite_impulse_exit(self, window: pd.DataFrame, side: int, position: dict) -> bool:
         if len(window) < 3:
+            _tg_debug(f"[OIE] SKIP — window too short ({len(window)})")
             return False
 
         last = window.iloc[-1]
 
         # ══════════════════════════════════════════
-        # 1. ATR — use 5m ATR for candle body comparison
-        # fall back to 1H ATR scaled down if 5m not available
+        # 1. ATR
         # ══════════════════════════════════════════
         if "ATR_5M" in window.columns:
             atr = window["ATR_5M"].iloc[-3:].mean()
@@ -503,22 +503,19 @@ class PositionManager:
             atr = None
 
         if atr is None or pd.isna(atr) or atr <= 0:
-            # fall back: scale 1H ATR down to 5m equivalent
             atr_1h = window["ATR"].iloc[-3:].mean()
             if pd.isna(atr_1h) or atr_1h <= 0:
                 atr_1h = window["ATR"].iloc[0]
             if pd.isna(atr_1h) or atr_1h <= 0:
+                _tg_debug(f"[OIE] SKIP — no valid ATR (window_len={len(window)})")
                 return False
-            atr = atr_1h * 0.20  # ~20% of 1H ATR as 5m proxy
+            atr = atr_1h * 0.20
 
         # ══════════════════════════════════════════
-        # 2. BODY SIZE — must be a real 5m impulse
+        # 2. BODY SIZE
         # ══════════════════════════════════════════
         body = abs(last["close"] - last["open"])
         big_candle = body > atr * 1.2
-
-        if not big_candle:
-            return False
 
         # ══════════════════════════════════════════
         # 3. DIRECTION CHECK
@@ -528,44 +525,55 @@ class PositionManager:
         else:
             wrong_direction = last["close"] > last["open"]
 
-        if not wrong_direction:
-            return False
-
         # ══════════════════════════════════════════
-        # 4. CLOSE LOCATION — where did it close
-        # relative to the current stop?
-        # a candle closing near the stop is far more
-        # dangerous than one closing near MFE
+        # 4. CLOSE LOCATION
         # ══════════════════════════════════════════
         entry = position["entry_price"]
         stop  = position["stop_loss"]
         R     = abs(entry - position["initial_stop"])
 
         if R == 0:
-            return True  # safety: if R is broken, trust the body check
-
-        if side == 1:
-            close_to_stop_r = (last["close"] - stop) / R
+            close_to_stop_r = 0.0
+            location_blocked = False
         else:
-            close_to_stop_r = (stop - last["close"]) / R
-
-        # if close is still more than 1.5R from stop it's a pullback not a collapse
-        mfe_r = position.get("mfe_r", 0.0)
-        if close_to_stop_r > 1.5 and mfe_r < 1.0:
-            return False
+            if side == 1:
+                close_to_stop_r = (last["close"] - stop) / R
+            else:
+                close_to_stop_r = (stop - last["close"]) / R
+            mfe_r = position.get("mfe_r", 0.0)
+            location_blocked = close_to_stop_r > 1.5 and mfe_r < 1.0
 
         # ══════════════════════════════════════════
         # 5. VOLUME CONFIRMATION
-        # impulse on low volume = likely noise
         # ══════════════════════════════════════════
+        vol_blocked = False
+        avg_vol = float("nan")
+        last_vol = last.get("volume", float("nan")) if hasattr(last, "get") else last["volume"]
         if "volume" in window.columns:
             avg_vol = window["volume"].iloc[-10:].mean()
             last_vol = last["volume"]
             if len(window) >= 10 and not pd.isna(avg_vol) and avg_vol > 0:
                 if last_vol < avg_vol * 0.8:
-                    return False
+                    vol_blocked = True
 
-        return True
+        # ══════════════════════════════════════════
+        # LOG EVERY BAR
+        # ══════════════════════════════════════════
+        fired = big_candle and wrong_direction and not location_blocked and not vol_blocked
+        symbol = position.get("symbol", "?")
+        bars   = position.get("bars_in_trade", "?")
+        mfe_r  = position.get("mfe_r", 0.0)
+
+        _tg_debug(
+            f"[OIE] {symbol} bar={bars} | {'🔥FIRED' if fired else 'miss'}\n"
+            f"o={last['open']:.6f} c={last['close']:.6f} | "
+            f"body={body:.6f} atr={atr:.6f} thr={atr*1.2:.6f} big={big_candle}\n"
+            f"wrong_dir={wrong_direction} | "
+            f"csr={close_to_stop_r:.3f} loc_block={location_blocked} mfe_r={mfe_r:.3f}\n"
+            f"vol: last={last_vol:.0f} avg={avg_vol:.0f} wlen={len(window)} vol_block={vol_blocked}"
+        )
+
+        return fired
 
     def _stop_pressure_exit(
         self, window: pd.DataFrame, stop_price: float, side: int, R: float
