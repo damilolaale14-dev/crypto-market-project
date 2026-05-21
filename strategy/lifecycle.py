@@ -123,15 +123,45 @@ class PositionManager:
             # APPEND BAR FIRST
             atr_5m = float(current_5m_row["ATR_5M"]) if "ATR_5M" in current_5m_row.index and not pd.isna(current_5m_row["ATR_5M"]) else None
 
-            self._bar_history.setdefault(symbol, []).append({
+            new_bar = {
                 "open": o,
                 "high": h,
                 "low": l,
                 "close": c,
                 "ATR": atr,
                 "ATR_5M": atr_5m,
-                "ts": current_ts,
-            })
+                "ts": str(current_ts),
+            }
+
+            # Guard: if bar_history for this symbol is missing or empty after
+            # _load(), rebuild it from lltf_df so OIE always has a real window.
+            # This is the stateless-worker fix — each cron tick gets a fresh PM
+            # instance, and if the bar history file failed to persist or load,
+            # we reconstruct it from the already-available 5m data rather than
+            # starting from scratch and condemning OIE to window-too-short forever.
+            if symbol not in self._bar_history or len(self._bar_history[symbol]) == 0:
+                if lltf_df is not None and not lltf_df.empty:
+                    entry_ts = pd.Timestamp(position["entry_5m_ts"])
+                    if entry_ts.tzinfo is None:
+                        entry_ts = entry_ts.tz_localize("UTC")
+                    history_df = lltf_df[lltf_df.index >= entry_ts].copy()
+                    # exclude the current bar — we append it fresh below
+                    history_df = history_df[history_df.index < current_ts]
+                    rebuilt = []
+                    for ts_h, row_h in history_df.iterrows():
+                        rebuilt.append({
+                            "open":   float(row_h["open"]),
+                            "high":   float(row_h["high"]),
+                            "low":    float(row_h["low"]),
+                            "close":  float(row_h["close"]),
+                            "ATR":    float(row_h["ATR"]) if "ATR" in row_h.index and not pd.isna(row_h["ATR"]) else atr,
+                            "ATR_5M": float(row_h["ATR_5M"]) if "ATR_5M" in row_h.index and not pd.isna(row_h["ATR_5M"]) else None,
+                            "ts":     str(ts_h),
+                        })
+                    self._bar_history[symbol] = rebuilt
+                    print(f"[BAR HISTORY REBUILT] {symbol} — {len(rebuilt)} bars from lltf_df")
+
+            self._bar_history.setdefault(symbol, []).append(new_bar)
 
             # KEEP WINDOW SIZE
             if len(self._bar_history[symbol]) > 200:
