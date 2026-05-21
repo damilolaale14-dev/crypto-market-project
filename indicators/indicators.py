@@ -798,14 +798,15 @@ def compute_htf_scores(htf_df,
     htf['HTF_DIRECTION'] = htf['SUPERTREND']
 
     # 2. VOLATILITY STATE
+    # 2. VOLATILITY STATE
     htf['HTF_ATR'] = atr_ema(htf)
-    htf['HTF_ATR_FAST'] = htf['HTF_ATR'].ewm(span=20, adjust=False).mean()
-    htf['HTF_ATR_SLOW'] = htf['HTF_ATR'].ewm(span=50, adjust=False).mean()
+    htf['HTF_ATR_FAST'] = htf['HTF_ATR'].ewm(span=20, adjust=False, min_periods=20).mean()
+    htf['HTF_ATR_SLOW'] = htf['HTF_ATR'].ewm(span=50, adjust=False, min_periods=50).mean()
     ver = htf['HTF_ATR_FAST'] / (htf['HTF_ATR_SLOW'] + 1e-9)
     htf['VOL_SCORE'] = ((ver - 0.8) / 0.4).clip(0, 1)
 
     # 3. PARTICIPATION
-    htf['HTF_VOL_MA'] = htf['volume'].ewm(span=part_lookback, adjust=False).mean()
+    htf['HTF_VOL_MA'] = htf['volume'].ewm(span=part_lookback, adjust=False, min_periods=part_lookback).mean()
     htf['HTF_VOL_RATIO'] = htf['volume'] / (htf['HTF_VOL_MA'] + 1e-9)
     htf['PART_SCORE'] = ((htf['HTF_VOL_RATIO'] - 1) / 1).clip(0, 1)
 
@@ -827,7 +828,7 @@ def compute_htf_scores(htf_df,
     price_slope = htf['close'].diff(window)
     htf['HTF_TREND_MOMENTUM'] = (
         price_slope / (htf['HTF_ATR'] * window + 1e-9)
-    ).ewm(span=3).mean()
+    ).ewm(span=3, min_periods=3).mean()
     htf['HTF_TREND_MOMENTUM_NORM'] = np.tanh(htf['HTF_TREND_MOMENTUM'] * 3.0)
     htf['MOMENTUM_SCORE'] = (
         (htf['HTF_TREND_MOMENTUM_NORM'] + 1) / 2
