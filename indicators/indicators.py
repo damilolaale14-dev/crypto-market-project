@@ -593,6 +593,16 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     vol_baseline     = df['VOL_RATIO'].ewm(span=500, adjust=False).mean()
     volume_confirmed = df['VOL_RATIO'] > vol_baseline * 1.15
 
+    print(
+        f"[BREAKOUT GATE] "
+        f"compression_ok={int(compression_ok.iloc[-1])} "
+        f"(COMPRESSION_BARS={int(df['COMPRESSION_BARS'].iloc[-1])}) | "
+        f"EARLY_EXPANSION={int(df['EARLY_EXPANSION'].iloc[-1])} "
+        f"(FLOW_STRENGTH={df['FLOW_STRENGTH'].iloc[-1]:.4f}) | "
+        f"volume_confirmed={int(volume_confirmed.iloc[-1])} "
+        f"(VOL_RATIO={df['VOL_RATIO'].iloc[-1]:.4f} baseline={vol_baseline.iloc[-1]:.4f})"
+    )
+    
     displacement_ok = df['DISPLACEMENT_SCORE'] > 0.15
     displacement_long_ok  = (
         df['BREAK_RESISTANCE'] | (df['DISPLACEMENT_SCORE'] > 0.45)
