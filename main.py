@@ -20,31 +20,53 @@ def fetch_binance(symbol, interval, limit):
     all_data = []
     end_time = None
 
-    while len(all_data) < limit:
+    for attempt in range(3):
+        try:
+            all_data = []
+            end_time = None
 
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": min(1000, limit - len(all_data))
-        }
+            while len(all_data) < limit:
 
-        if end_time:
-            params["endTime"] = end_time
+                params = {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "limit": min(1000, limit - len(all_data))
+                }
 
-        response = requests.get(BINANCE_URL, params=params)
-        data = response.json()
+                if end_time:
+                    params["endTime"] = end_time
 
-        if not data:
-            break
+                response = requests.get(BINANCE_URL, params=params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
 
-        all_data = data + all_data
+                if isinstance(data, dict):
+                    print(f"[FETCH] {symbol} {interval} — Binance error: {data}")
+                    raise RuntimeError(f"Binance error: {data}")
 
-        first_open_time = data[0][0]
-        end_time = first_open_time - 1
-        time.sleep(0.25)
+                if not isinstance(data, list) or not data:
+                    break
 
-        if len(data) < 1000:
-            break
+                all_data = data + all_data
+
+                first_open_time = data[0][0]
+                end_time = first_open_time - 1
+                time.sleep(0.25)
+
+                if len(data) < 1000:
+                    break
+
+            break  # success
+
+        except Exception as e:
+            print(f"[FETCH] {symbol} {interval} — attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+            else:
+                raise RuntimeError(f"[FETCH] {symbol} {interval} — all retries failed: {e}")
+
+    if not all_data:
+        raise RuntimeError(f"[FETCH] {symbol} {interval} — no data returned after retries")
 
     df = pd.DataFrame(all_data, columns=[
         "open_time",
@@ -70,13 +92,16 @@ def fetch_binance(symbol, interval, limit):
 
     return df
 
-
 # ==========================================================
-# CONFIG ETH-, EOS/, DOT//, ATOM-, AXS/, TRX\, DOGE-, BCH//, BAND/, XLM/, SUI//, FIL/, LINK/,
-# BTC/, ZEN/, AVAX-, RUNE/, ORDI/, PENDLE/, ADA\, XRP/, TIA/, SOL/, MKR/, ETC/, TRB/
+# CONFIG 
 # ==========================================================
-
-SYMBOL = "ETCUSDT"
+# SYMBOLS = [
+#     "ETHUSDT", "BNBUSDT", "AVAXUSDT", "BCHUSDT"-, "AAVEUSDT", "XLMUSDT", 
+#     "SUIUSDT", "FILUSDT", "LINKUSDT", "LDOUSDT", "SNXUSDT", "RUNEUSDT", 
+#     "ORDIUSDT", "CRVUSDT", "ADAUSDT", "TIAUSDT", "SOLUSDT", "ICPUSDT", 
+#     "PAXGUSDT", "TRBUSDT"
+# ] TRX- OP- FET-
+SYMBOL = "CRVUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -91,15 +116,16 @@ LEVERAGE = 1
 # LTF_LIMIT = 43800   # ~30 days of 1h candles
 # HTF_LIMIT = 10950   # ~120 days of 4h candles
 
+# LLTF_LIMIT = 420480
 # LTF_LIMIT = 35040   # ~30 days of 1h candles
 # HTF_LIMIT = 8760   # ~120 days of 4h candles
 
 # LTF_LIMIT = 26280   # ~30 days of 1h candles
 # HTF_LIMIT = 6570   # ~120 days of 4h candles
 
-# LLTF_LIMIT = 210240
-# LTF_LIMIT = 17520   # ~30 days of 1h candles
-# HTF_LIMIT = 4380   # ~120 days of 4h candles
+LLTF_LIMIT = 210240
+LTF_LIMIT = 17520   # ~30 days of 1h candles
+HTF_LIMIT = 4380   # ~120 days of 4h candles
 
 # LTF_LIMIT = 8760   # ~30 days of 1h candles
 # HTF_LIMIT = 2190   # ~120 days of 4h candles
@@ -112,9 +138,9 @@ LEVERAGE = 1
 # LTF_LIMIT = 2000   # ~30 days of 1h candles
 # HTF_LIMIT = 500   # ~120 days of 4h candles
 
-LLTF_LIMIT = 12000
-LTF_LIMIT = 1000   # ~30 days of 1h candles
-HTF_LIMIT = 250   # ~120 days of 4h candles
+# LLTF_LIMIT = 12000
+# LTF_LIMIT = 1000   # ~30 days of 1h candles
+# HTF_LIMIT = 250   # ~120 days of 4h candles
 
 # LLTF_LIMIT = 6000
 # LTF_LIMIT = 500   # ~30 days of 1h candles
@@ -133,53 +159,76 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 def load_or_fetch(symbol, interval, limit, now_utc):
     path = os.path.join(CACHE_DIR, f"{symbol}_{interval}.parquet")
+    sentinel_path = os.path.join(CACHE_DIR, f"{symbol}_{interval}.oldest")  # ← new
+
+    INTERVAL_SECONDS = {"5m": 300, "1h": 3600, "4h": 14400}
+    interval_td = pd.Timedelta(seconds=INTERVAL_SECONDS.get(interval, 3600))
 
     if os.path.exists(path):
         cached = pd.read_parquet(path)
         cached.index = pd.to_datetime(cached.index, utc=True)
         cached = cached.sort_index()
+
+        required_start = now_utc - limit * interval_td
+        cache_start    = cached.index[0]
+
+        # ── STEP 1: backward extension ──
+        # Skip if we already know we've hit the listing wall
+        already_at_oldest = os.path.exists(sentinel_path)
+
+        if not already_at_oldest and cache_start > required_start + interval_td:
+            print(f"[CACHE] {symbol} {interval} — cache starts at {cache_start}, need {required_start}, fetching older bars...")
+            old_data = fetch_binance_range(symbol, interval, required_start, cache_start - interval_td)
+            print(f"[CACHE] {symbol} {interval} — backward fetch returned {len(old_data)} bars")
+
+            if not old_data.empty:
+                cached = pd.concat([old_data, cached])
+                cached = cached[~cached.index.duplicated(keep="last")]
+                cached = cached.sort_index()
+                print(f"[CACHE] {symbol} {interval} — extended backward, now {len(cached)} bars")
+            else:
+                # Got nothing — we've hit the listing wall, record it
+                print(f"[CACHE] {symbol} {interval} — hit listing wall at {cache_start}, saving sentinel")
+                with open(sentinel_path, "w") as f:
+                    f.write(str(cache_start))
+        elif already_at_oldest:
+            print(f"[CACHE] {symbol} {interval} — listing wall known, skipping backward fetch")
+
+        # ── STEP 2: extend FORWARD if cache is behind current time ──
         last_ts = cached.index[-1]
 
-        # check if cache covers enough history for the requested limit
-        # if not, re-download from scratch
-        if len(cached) < limit * 0.95:
-            print(f"[CACHE] {symbol} {interval} — cache has {len(cached)} bars but {limit} requested, re-downloading...")
-            os.remove(path)
-            df = fetch_binance(symbol, interval, limit)
-            df.to_parquet(path)
-            print(f"[CACHE] {symbol} {interval} — saved {len(df)} bars")
-            return df
-
-        # determine fetch start based on interval
         if interval == "1h":
-            fetch_start = last_ts + pd.Timedelta(hours=1)
-            fetch_end = now_utc.floor("h") - pd.Timedelta(hours=1)
+            fetch_start = last_ts + interval_td
+            fetch_end   = now_utc.floor("h") - interval_td
         elif interval == "4h":
-            fetch_start = last_ts + pd.Timedelta(hours=4)
-            fetch_end = now_utc
+            fetch_start = last_ts + interval_td
+            fetch_end   = now_utc
         elif interval == "5m":
-            fetch_start = last_ts + pd.Timedelta(minutes=5)
-            fetch_end = now_utc
+            fetch_start = last_ts + interval_td
+            fetch_end   = now_utc
         else:
-            fetch_start = last_ts + pd.Timedelta(hours=1)
-            fetch_end = now_utc
+            fetch_start = last_ts + interval_td
+            fetch_end   = now_utc
 
         if fetch_start <= fetch_end:
             print(f"[CACHE] {symbol} {interval} — fetching new bars from {fetch_start} to {fetch_end}")
             new_data = fetch_binance_range(symbol, interval, fetch_start, fetch_end)
+            print(f"[CACHE] {symbol} {interval} — forward fetch returned {len(new_data)} bars")
             if not new_data.empty:
-                combined = pd.concat([cached, new_data])
-                combined = combined[~combined.index.duplicated(keep="last")]
-                combined = combined.sort_index()
-                # trim to limit
-                combined = combined.iloc[-limit:]
-                combined.to_parquet(path)
-                print(f"[CACHE] {symbol} {interval} — updated, total bars: {len(combined)}")
-                return combined
+                cached = pd.concat([cached, new_data])
+                cached = cached[~cached.index.duplicated(keep="last")]
+                cached = cached.sort_index()
         else:
-            print(f"[CACHE] {symbol} {interval} — cache current, {len(cached)} bars")
+            print(f"[CACHE] {symbol} {interval} — cache current at {last_ts}")
 
-        return cached.iloc[-limit:]
+        # ── STEP 3: save the FULL cache (never trim to limit) ──
+        # Trimming to limit is what caused the 2-month test to destroy
+        # the 2-year cache. Save everything, slice on return only.
+        cached.to_parquet(path)
+        print(f"[CACHE] {symbol} {interval} — saved {len(cached)} bars total")
+
+        # ── STEP 4: return only the requested window ──
+        return cached.iloc[-limit:].copy()
 
     else:
         print(f"[CACHE] {symbol} {interval} — no cache, downloading {limit} bars...")
@@ -189,35 +238,60 @@ def load_or_fetch(symbol, interval, limit, now_utc):
         return df
 
 def fetch_binance_range(symbol, interval, start, end):
-    """Fetch only bars between start and end timestamps."""
     start_ms = int(start.timestamp() * 1000)
     end_ms   = int(end.timestamp() * 1000)
+
+    if start_ms >= end_ms:
+        print(f"[FETCH RANGE] {symbol} {interval} — start >= end, nothing to fetch")
+        return pd.DataFrame()
 
     all_data = []
     current_end_ms = end_ms
 
-    while True:
-        params = {
-            "symbol":    symbol.replace("-", "").upper(),
-            "interval":  interval,
-            "limit":     1000,
-            "endTime":   current_end_ms,
-            "startTime": start_ms,
-        }
-        response = requests.get(BINANCE_URL, params=params)
-        data = response.json()
+    for attempt in range(3):
+        try:
+            while True:
+                params = {
+                    "symbol":   symbol.replace("-", "").upper(),
+                    "interval": interval,
+                    "limit":    1000,
+                    "endTime":  current_end_ms,
+                    # ← NO startTime here; we walk backward and break manually
+                }
+                response = requests.get(BINANCE_URL, params=params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
 
-        if not data or not isinstance(data, list):
-            break
+                if isinstance(data, dict):
+                    print(f"[FETCH RANGE] {symbol} {interval} — Binance error: {data}")
+                    raise RuntimeError(f"Binance error: {data}")
 
-        all_data = data + all_data
-        oldest = data[0][0]
+                if not isinstance(data, list) or len(data) == 0:
+                    break
 
-        if oldest <= start_ms or len(data) < 1000:
-            break
+                all_data = data + all_data
+                oldest = data[0][0]
 
-        current_end_ms = oldest - 1
-        time.sleep(0.25)
+                # Stop if we've reached or passed our desired start
+                if oldest <= start_ms:
+                    break
+
+                # Stop if Binance returned a partial page (no more history)
+                if len(data) < 1000:
+                    break
+
+                current_end_ms = oldest - 1
+                time.sleep(0.25)
+
+            break  # success
+
+        except Exception as e:
+            print(f"[FETCH RANGE] {symbol} {interval} — attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+            else:
+                print(f"[FETCH RANGE] {symbol} {interval} — all retries failed, cache will remain stale")
+                return pd.DataFrame()
 
     if not all_data:
         return pd.DataFrame()
@@ -231,6 +305,11 @@ def fetch_binance_range(symbol, interval, start, end):
     df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     df = df.drop(columns=["open_time"]).set_index("timestamp").astype(float)
     df = df[~df.index.duplicated(keep="last")].sort_index()
+
+    # Trim to requested window AFTER fetching
+    df = df[df.index >= pd.to_datetime(start_ms, unit="ms", utc=True)]
+    df = df[df.index <= pd.to_datetime(end_ms,   unit="ms", utc=True)]
+
     return df
 
 print("Loading LLTF data (5m)...")
@@ -246,11 +325,9 @@ htf_df = load_or_fetch(SYMBOL, HTF_INTERVAL, HTF_LIMIT, now_utc)
 current_1h_boundary = now_utc.floor("h")
 ltf_df = ltf_df[ltf_df.index <= current_1h_boundary - pd.Timedelta(hours=1)].copy()
 
-hours_into_4h = now_utc.hour % 4
-last_closed_4h = now_utc.floor("h") - pd.Timedelta(hours=hours_into_4h) - pd.Timedelta(hours=4)
-current_4h_open = last_closed_4h + pd.Timedelta(hours=4)
+current_4h_open = now_utc.floor("4h")
 htf_df = htf_df[htf_df.index < current_4h_open].copy()
-print(f"[DEBUG] htf_df after incomplete bar drop: last={htf_df.index[-1]} len={len(htf_df)}")
+print(f"[DEBUG] now_utc={now_utc.strftime('%Y-%m-%d %H:%M UTC')} | current_4h_open={current_4h_open} | last_closed_4h={htf_df.index[-1]} len={len(htf_df)}")
 
 # lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
 ltf_df.index = pd.to_datetime(ltf_df.index, utc=True)

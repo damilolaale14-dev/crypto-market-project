@@ -151,6 +151,10 @@ class SignalBacktester:
 
         if atr is None or pd.isna(atr) or atr <= 0:
             atr_1h = window["ATR"].iloc[-3:].mean() if "ATR" in window.columns else (window['high'] - window['low']).mean()
+            if pd.isna(atr_1h) or atr_1h <= 0:
+                atr_1h = window["ATR"].iloc[0] if "ATR" in window.columns else float("nan")
+            if pd.isna(atr_1h) or atr_1h <= 0:
+                return False
             atr = atr_1h * 0.20
 
         if pd.isna(atr) or atr <= 0:
@@ -162,9 +166,6 @@ class SignalBacktester:
         body = abs(last.close - last.open)
         big_candle = body > atr * 1.2
 
-        if not big_candle:
-            return False
-
         # ══════════════════════════════════════════
         # 3. DIRECTION CHECK
         # ══════════════════════════════════════════
@@ -173,16 +174,17 @@ class SignalBacktester:
         else:
             wrong_direction = last.close > last.open
 
-        if not wrong_direction:
-            return False
-
         # ══════════════════════════════════════════
         # 4. CLOSE LOCATION
         # ══════════════════════════════════════════
+        location_blocked = False
         if trade is not None:
             entry = trade["entry_price"]
             stop  = trade["stop_loss"]
-            R     = abs(entry - trade.get("ATR", abs(entry - stop)))
+            # use initial_stop as R anchor — matches lifecycle.py exactly
+            R = abs(entry - trade.get("initial_stop", stop))
+            if R == 0:
+                R = abs(entry - stop)
 
             if R > 0:
                 if side == 1:
@@ -190,21 +192,21 @@ class SignalBacktester:
                 else:
                     close_to_stop_r = (stop - last.close) / R
 
-                mfe_r = trade.get("mfe_r", 0.0) if trade is not None else 0.0
-                if close_to_stop_r > 1.5 and mfe_r < 1.0:
-                    return False
+                mfe_r = trade.get("mfe_r", 0.0)
+                location_blocked = close_to_stop_r > 1.5 and mfe_r < 1.0
 
         # ══════════════════════════════════════════
         # 5. VOLUME CONFIRMATION
         # ══════════════════════════════════════════
+        vol_blocked = False
         if "volume" in window.columns:
             avg_vol = window["volume"].iloc[-10:].mean()
             last_vol = last.volume
             if len(window) >= 10 and not pd.isna(avg_vol) and avg_vol > 0:
                 if last_vol < avg_vol * 0.8:
-                    return False
+                    vol_blocked = True
 
-        return True
+        return big_candle and wrong_direction and not location_blocked and not vol_blocked
         
     def stop_pressure_exit(self, window, stop_price, side):
         if len(window) < self.PRESSURE_BARS:
@@ -309,6 +311,7 @@ class SignalBacktester:
             "entry_price": price,
             "units": units,
             "stop_loss": stop,
+            "initial_stop": stop,
             "ATR": atr,
             "MAE": 0.0,
             "MFE": 0.0
@@ -572,11 +575,13 @@ class SignalBacktester:
                 self._exit(self.liquidation_price, idx, "liquidated")
                 return
 
-        # ── HARD STOP — always last ─────────────────────────────
+        # ── HARD STOP — checked before impulse exit ─────────────
         if side == 1 and low <= trade["stop_loss"]:
             self._exit(trade["stop_loss"], idx, "stop_loss")
+            return
         elif side == -1 and high >= trade["stop_loss"]:
             self._exit(trade["stop_loss"], idx, "stop_loss")
+            return
 
     # ------------------------
     # Run backtest

@@ -25,16 +25,108 @@ def RSI(series, period=14):
 # ==========================================================
 # TREND CONTEXT
 # ==========================================================
-def trend_bias(df, window=50):
+def positioning_pressure(df, fast=10, slow=50):
+    """
+    Replaces trend_bias() / TREND_QUALITY.
 
-    df['TREND_SLOPE'] = rolling_slope(df['close'], window)
-    df['TREND_R2'] = rolling_r2(df['close'], window)
+    Philosophy: stop asking "is this trend smooth?"
+    Start asking "is positioning becoming unstable?"
 
-    # Combine direction + velocity + reliability
-    df['TREND_QUALITY'] = df['TREND_SLOPE'] * df['TREND_R2']
+    POSITIONING_PRESSURE measures whether one side of the
+    market is accumulating stress faster than price resolves it.
+    This is durable across regimes because it is tied to
+    human forced-behavior mechanics, not trend elegance.
 
-    # Normalize to stable range (important)
-    df['TREND_QUALITY'] = hybrid_zscore(df['TREND_QUALITY'])
+    Outputs:
+        TREND_QUALITY       — drop-in replacement, same name,
+                              now means positioning pressure
+                              rather than slope * R2
+        POSITION_STRESS     — raw unsigned instability magnitude
+        POSITION_DIRECTION  — signed bias (+1 bull / -1 bear)
+        POSITION_DIVERGENCE — flow vs price disagreement
+                              (precursor to reversals)
+    """
+
+    # --------------------------------------------------
+    # 1. SIGNED DELTA FLOW (who is getting trapped)
+    # Price move per unit of volume participation.
+    # Negative = volume not confirming price = trapped longs.
+    # Positive = volume confirming = pressure building.
+    # --------------------------------------------------
+    price_move   = df['close'].diff()
+    dollar_flow  = df['volume'] * (df['close'] - df['open'])
+
+    # Normalize flow by its own slow EWMA to make it regime-independent
+    flow_baseline = dollar_flow.ewm(span=200, adjust=False).mean()
+    flow_norm     = dollar_flow / (flow_baseline.abs() + 1e-9)
+
+    # --------------------------------------------------
+    # 2. PRICE RESPONSE ELASTICITY
+    # How much price moves per unit of flow.
+    # Falling elasticity = absorption = trapped side building.
+    # --------------------------------------------------
+    flow_ewm_fast = dollar_flow.ewm(span=fast, adjust=False).mean()
+    flow_ewm_slow = dollar_flow.ewm(span=slow, adjust=False).mean()
+
+    price_ewm_fast = price_move.ewm(span=fast, adjust=False).mean()
+    price_ewm_slow = price_move.ewm(span=slow, adjust=False).mean()
+
+    # elasticity: price response per unit flow, fast vs slow
+    elast_fast = price_ewm_fast / (flow_ewm_fast.abs() + 1e-9)
+    elast_slow = price_ewm_slow / (flow_ewm_slow.abs() + 1e-9)
+
+    # Elasticity collapse = one side absorbing without price movement
+    # = positioning stress building
+    df['ELAST_RATIO'] = elast_fast / (elast_slow.abs() + 1e-9)
+
+    # --------------------------------------------------
+    # 3. FLOW DIVERGENCE FROM PRICE
+    # Flow trending one way while price moves another
+    # = inventory imbalance building = positioning instability
+    # --------------------------------------------------
+    flow_direction  = np.sign(flow_ewm_fast)
+    price_direction = np.sign(price_ewm_fast)
+
+    df['POSITION_DIVERGENCE'] = (flow_direction != price_direction).astype(float)
+
+    # Smooth divergence signal
+    df['POSITION_DIVERGENCE'] = df['POSITION_DIVERGENCE'].ewm(span=5, adjust=False).mean()
+
+    # --------------------------------------------------
+    # 4. POSITIONING STRESS (unsigned instability magnitude)
+    # Combines:
+    #   - flow imbalance magnitude
+    #   - elasticity collapse signal
+    #   - flow/price divergence
+    # --------------------------------------------------
+    flow_imbalance = (flow_ewm_fast - flow_ewm_slow).abs()
+    flow_imbalance_norm = hybrid_zscore(flow_imbalance).clip(0, 3) / 3
+
+    elast_collapse = (1 - df['ELAST_RATIO'].clip(0, 1))  # 1 = fully collapsed
+
+    df['POSITION_STRESS'] = (
+        0.5 * flow_imbalance_norm +
+        0.3 * elast_collapse +
+        0.2 * df['POSITION_DIVERGENCE']
+    ).ewm(span=3, adjust=False).mean()
+
+    # --------------------------------------------------
+    # 5. DIRECTION OF STRESS
+    # Which side is under pressure?
+    # +1 = bears trapped (bullish pressure)
+    # -1 = bulls trapped (bearish pressure)
+    # --------------------------------------------------
+    df['POSITION_DIRECTION'] = np.sign(flow_ewm_fast) * df['POSITION_STRESS']
+
+    # --------------------------------------------------
+    # 6. TREND_QUALITY — drop-in replacement
+    # Same column name so nothing downstream breaks.
+    # Now means: signed positioning pressure
+    # rather than slope * R2.
+    # Range stays roughly -1 to +1 after normalization.
+    # --------------------------------------------------
+    raw = df['POSITION_DIRECTION']
+    df['TREND_QUALITY'] = hybrid_zscore(raw).clip(-2, 2) / 2
 
     return df
 
@@ -70,21 +162,108 @@ def support_resistance(df, lookback=20):
 # ==========================================================
 # BREAKOUT LOGIC
 # ==========================================================
-def breakout_logic(df, atr_k=0.5):
+def liquidity_displacement(df, vol_lookback=20, accel_threshold=1.4):
     """
-    Volatility-adjusted breakout.
-    Break must clear structure by ATR fraction.
+    Replaces breakout_logic() / BREAK_RESISTANCE / BREAK_SUPPORT.
+
+    Philosophy: stop asking "did price break structure?"
+    Start asking "did price displace liquidity violently enough
+    to imply inventory imbalance?"
+
+    A real displacement has three simultaneous properties:
+        1. Price cleared structure (still required, not removed)
+        2. The move ACCELERATED through the level (not crept)
+        3. Volume spiked asymmetrically AT the displacement bar
+           (not before, not after — at)
+
+    Creeping through resistance = absorption = trap.
+    Accelerating through resistance = displacement = real.
+
+    Outputs:
+        BREAK_RESISTANCE    — drop-in, same name
+        BREAK_SUPPORT       — drop-in, same name
+        DISPLACEMENT_SCORE  — continuous 0-1 quality of the event
+        ABSORBED_LONG       — price cleared but was absorbed (bearish)
+        ABSORBED_SHORT      — price cleared but was absorbed (bullish)
     """
 
-    # Ensure ATR exists
     if 'ATR' not in df.columns:
         df['ATR'] = atr_ema(df)
 
     resistance = df['RESISTANCE'].shift(1)
-    support = df['SUPPORT'].shift(1)
+    support    = df['SUPPORT'].shift(1)
 
-    df['BREAK_RESISTANCE'] = df['close'] > (resistance + atr_k * df['ATR'])
-    df['BREAK_SUPPORT'] = df['close'] < (support - atr_k * df['ATR'])
+    # --------------------------------------------------
+    # 1. PRICE CLEARED STRUCTURE (baseline, same as before)
+    # Kept intentionally — displacement requires structure
+    # breach. ATR buffer unchanged from original.
+    # --------------------------------------------------
+    cleared_resistance = df['close'] > (resistance + 0.5 * df['ATR'])
+    cleared_support    = df['close'] < (support    - 0.5 * df['ATR'])
+
+    # --------------------------------------------------
+    # 2. MOVE ACCELERATION
+    # Measured over a 3-bar window around the break.
+    # Real displacements don't always peak on the exact
+    # structure bar — the energy can lead or trail by 1-2 bars.
+    # We look at the peak candle size in a [-1, 0, +0] window
+    # (causal: current and prior bar only, no lookahead).
+    # --------------------------------------------------
+    candle_size     = (df['high'] - df['low'])
+    avg_candle_size = candle_size.ewm(span=vol_lookback, adjust=False).mean()
+    candle_accel    = candle_size / (avg_candle_size + 1e-9)
+
+    # Peak acceleration within a 2-bar causal window
+    # This catches the bar before the break AND the break bar itself
+    accel_window    = candle_accel.rolling(2).max()
+    acceleration_ok = accel_window > accel_threshold
+
+    # --------------------------------------------------
+    # 3. VOLUME ASYMMETRY
+    # Volume spike within a 3-bar causal window.
+    # Institutional accumulation often builds across
+    # multiple bars before structure gives way.
+    # --------------------------------------------------
+    vol_baseline       = df['volume'].ewm(span=vol_lookback, adjust=False).mean()
+    vol_spike          = df['volume'] / (vol_baseline + 1e-9)
+    vol_spike_baseline = vol_spike.ewm(span=500, adjust=False).mean()
+
+    # Peak volume within a 3-bar causal window
+    vol_window    = vol_spike.rolling(3).max()
+    vol_displaced = vol_window > (vol_spike_baseline * 1.1)
+
+    # --------------------------------------------------
+    # 4. DISPLACEMENT SCORE (continuous quality 0→1)
+    # Uses windowed values so score reflects the event
+    # quality, not just the exact bar's raw numbers.
+    # --------------------------------------------------
+    accel_norm = ((accel_window - 1).clip(0, 3) / 3)
+    vol_norm   = ((vol_window - 1).clip(0, 3) / 3)
+
+    df['DISPLACEMENT_SCORE'] = (
+        0.5 * accel_norm +
+        0.5 * vol_norm
+    ).ewm(span=2, adjust=False).mean()
+
+    # --------------------------------------------------
+    # 5. ABSORPTION DETECTION
+    # Structure cleared but BOTH acceleration AND volume
+    # were weak across the entire window = absorbed.
+    # --------------------------------------------------
+    df['ABSORBED_LONG']  = cleared_resistance & ~acceleration_ok & ~vol_displaced
+    df['ABSORBED_SHORT'] = cleared_support    & ~acceleration_ok & ~vol_displaced
+
+    # --------------------------------------------------
+    # 6. FINAL OUTPUTS
+    # Structure + at least ONE of the two energy conditions
+    # within the window. Requiring both simultaneously was
+    # the source of the over-restriction — real displacement
+    # events rarely peak all three signals on the same bar.
+    # Using OR here preserves the philosophy (energy required)
+    # without demanding simultaneity that markets don't honor.
+    # --------------------------------------------------
+    df['BREAK_RESISTANCE'] = cleared_resistance & (acceleration_ok | vol_displaced)
+    df['BREAK_SUPPORT']    = cleared_support    & (acceleration_ok | vol_displaced)
 
     return df
 
@@ -117,20 +296,27 @@ def volatility_expansion(df, fast=14, slow=50):
 # ==========================================================
 def volatility_state(df):
     """
-    Uses Volatility Expansion Ratio instead of ATR percentile.
-
-    This makes the system asset-agnostic and regime aware.
+    Adaptive anchor volatility state.
+    Threshold evolves slowly with the market's own volatility baseline
+    rather than being fixed at 2026 calibration values.
+    span=1000 ≈ 6 weeks at 1H — slow enough to be structural,
+    fast enough to adapt across market eras.
     """
 
-    # Ensure VER exists
     if 'VER' not in df.columns:
         df = volatility_expansion(df)
 
-    # Regime classification
+    # Slow-moving structural baseline
+    ver_baseline = df['VER'].ewm(span=1000, adjust=False).mean()
+
+    # Thresholds adapt with the baseline, not against a fixed number
+    df['VOL_COMPRESS_TH'] = ver_baseline * 0.90
+    df['VOL_EXPAND_TH']   = ver_baseline * 1.10
+
     df['VOL_STATE'] = np.select(
         [
-            df['VER'] < 0.9,   # compression
-            df['VER'] > 1.1    # expansion
+            df['VER'] < df['VOL_COMPRESS_TH'],
+            df['VER'] > df['VOL_EXPAND_TH']
         ],
         [-1, 1],
         default=0
@@ -140,23 +326,25 @@ def volatility_state(df):
 
 def trend_efficiency_state(df, lookback=50, er_window=20):
     """
-    Replaces raw range width with Trend Efficiency (Directional Persistence).
-    Measures how efficiently price is moving in a direction over the lookback.
+    Adaptive anchor trend efficiency state.
+    ER baseline adapts slowly over ~800 bars (~33 days at 1H)
+    so the trend/compression threshold evolves with the market
+    rather than being frozen at a universal constant.
     """
 
-    # ------------------------------------------------------
-    # 1️⃣ Compute rolling efficiency ratio
-    # ------------------------------------------------------
     df['ER'] = efficiency_ratio(df['close'], er_window)
 
-    # ------------------------------------------------------
-    # 2️⃣ Define compression / expansion state
-    # Use ER instead of range width to detect sideways vs trending
-    # ------------------------------------------------------
+    # Slow structural baseline — longer than ER's own lookback
+    er_baseline = df['ER'].ewm(span=800, adjust=False).mean()
+
+    # Thresholds shift with the baseline
+    df['ER_COMPRESS_TH'] = er_baseline - 0.10
+    df['ER_TREND_TH']    = er_baseline + 0.12
+
     df['STRUCT_STATE'] = np.select(
         [
-            df['ER'] < 0.45,  # low efficiency → sideways / compression
-            df['ER'] > 0.7    # high efficiency → trending / expansion
+            df['ER'] < df['ER_COMPRESS_TH'],
+            df['ER'] > df['ER_TREND_TH']
         ],
         [-1, 1],
         default=0
@@ -381,16 +569,17 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     body = (df['close'] - df['open']).abs()
     range_ = df['high'] - df['low']
 
-    # Ensure contextual displacement exists
+    # Only keep dynamic_state_engine — it feeds VOL_STATE/STRUCT_STATE
+    # which expansion_maturity now reads directly.
+    # expansion_ignition and expansion_continuation are removed —
+    # they were the deepest part of the abstraction chain and
+    # their outputs (IGNITION_OK, CONTINUATION_OK) are commented
+    # out in VALID_BREAK anyway, so they were dead weight.
     df = dynamic_state_engine(df)
-    df = expansion_ignition(df)
-    df = expansion_continuation(df)
+    df = expansion_maturity(df)      # now shallow — 2 direct reads
+    df = compression_detector(df)
 
-    # --- Strong body relative to candle range
-    body_ratio_series = body / (range_ + 1e-9)
-    df['STRONG_BODY'] = hybrid_zscore(body_ratio_series) > 0.5
-
-    # --- ATR expansion confirms real move
+    # --- ATR expansion (kept — it's a direct primitive read)
     df['ATR_EXPAND'] = df['ATR'] > df['ATR'].rolling(20).mean() * atr_mult
 
     pressure_z = hybrid_zscore(df['COMPOSITE_PRESSURE'])
@@ -399,35 +588,31 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     df['PRESSURE_ELEVATED_LONG']  = pressure_z > (recent_avg + recent_std)
     df['PRESSURE_ELEVATED_SHORT'] = pressure_z < (recent_avg - recent_std)
 
-    df = expansion_maturity(df)
-    df = compression_detector(df)
     compression_ok = df['COMPRESSION_BARS'] >= 3
-    volume_confirmed = df['VOL_RATIO'] > 1.3
 
+    vol_baseline     = df['VOL_RATIO'].ewm(span=500, adjust=False).mean()
+    volume_confirmed = df['VOL_RATIO'] > vol_baseline * 1.15
+
+    displacement_ok = df['DISPLACEMENT_SCORE'] > 0.15
+    displacement_long_ok  = (
+        df['BREAK_RESISTANCE'] | (df['DISPLACEMENT_SCORE'] > 0.45)
+    )
+    displacement_short_ok = (
+        df['BREAK_SUPPORT'] | (df['DISPLACEMENT_SCORE'] > 0.45)
+    )
 
     df['VALID_BREAK_LONG'] = (
         compression_ok &
-        # df['EARLY_EXPANSION'] 
-        # df['IGNITION_OK'] &
-        volume_confirmed
-        # df['CONTINUATION_OK']) 
-        # df['PRESSURE_ELEVATED_LONG'] 
-        # (df['COMPOSITE_PRESSURE'] > 0) 
+        df['EARLY_EXPANSION'] &
+        volume_confirmed 
     )
 
     df['VALID_BREAK_SHORT'] = (
         compression_ok &
-        # df['EARLY_EXPANSION'] 
-        # df['IGNITION_OK'] &
-        volume_confirmed
-        # df['CONTINUATION_OK']) 
-        # df['PRESSURE_ELEVATED_SHORT'] 
-        # (df['COMPOSITE_PRESSURE'] < 0) 
+        df['EARLY_EXPANSION'] &
+        volume_confirmed 
     )
 
-    # ======================================================
-    # BREAKOUT AGE (ENTRY DECAY CORE)
-    # ======================================================
     df['BARS_SINCE_LONG_BREAK']  = bars_since_event(df['VALID_BREAK_LONG'])
     df['BARS_SINCE_SHORT_BREAK'] = bars_since_event(df['VALID_BREAK_SHORT'])
 
@@ -510,43 +695,81 @@ def micro_consolidation(df, lookback=12, tightness=0.6):
 
     return df
 
-def supertrend(df, period=10, multiplier=3, eps=1e-6):
-    atr = atr_ema(df, period).round(6)
+def supertrend(df, period=10, multiplier=3, eps=1e-6,
+               flip_margin_atr=0.10, min_flip_bars=2):
+    """
+    SuperTrend with two real performance improvements:
 
-    hl2 = ((df['high'] + df['low']) / 2).round(6)
+    1. FLIP MARGIN
+       A trend flip requires close to clear the band by
+       flip_margin_atr * ATR, not just epsilon.
+       Eliminates whipsaw flips from marginal closes in
+       choppy regimes — exactly when stability matters most.
 
-    upper_band = (hl2 + multiplier * atr).round(6)
-    lower_band = (hl2 - multiplier * atr).round(6)
+    2. MINIMUM FLIP BARS
+       A flip is only accepted if the prior trend has held
+       for at least min_flip_bars. Prevents single-bar
+       flip/reflip pairs that generate entry+immediate reversal
+       signals before any real move develops.
 
-    final_upper = upper_band.copy()
-    final_lower = lower_band.copy()
+    Both parameters are intentionally small defaults —
+    flip_margin_atr=0.10 means 10% of ATR, min_flip_bars=2
+    means at least 2 bars in the prior trend. These filter
+    noise without meaningfully lagging real trend changes.
 
-    trend = pd.Series(1, index=df.index)
+    For HTF use (4H), consider min_flip_bars=3 to account
+    for the lower bar frequency.
+    """
 
-    close = df['close'].round(6)
+    atr_series = atr_ema(df, period).round(6)
+    atr_vals   = atr_series.values
 
-    for i in range(1, len(df)):
+    hl2       = (df['high'] + df['low']) / 2
+    upper_raw = (hl2 + multiplier * atr_series).values
+    lower_raw = (hl2 - multiplier * atr_series).values
+    close     = df['close'].values
+    n         = len(df)
 
-        # stable band logic
-        if close.iat[i-1] <= final_upper.iat[i-1] + eps:
-            final_upper.iat[i] = min(upper_band.iat[i], final_upper.iat[i-1])
+    final_upper = upper_raw.copy()
+    final_lower = lower_raw.copy()
+    trend       = np.ones(n, dtype=np.int8)
+
+    bars_since_flip = 0
+
+    for i in range(1, n):
+
+        # ── Ratchet bands (unchanged — this part is correct) ──
+        final_upper[i] = (
+            min(upper_raw[i], final_upper[i-1])
+            if close[i-1] <= final_upper[i-1] + eps
+            else upper_raw[i]
+        )
+        final_lower[i] = (
+            max(lower_raw[i], final_lower[i-1])
+            if close[i-1] >= final_lower[i-1] - eps
+            else lower_raw[i]
+        )
+
+        # ── Flip logic with margin + minimum holding period ──
+        flip_margin = atr_vals[i] * flip_margin_atr
+
+        bull_flip = close[i] > final_upper[i-1] + flip_margin
+        bear_flip = close[i] < final_lower[i-1] - flip_margin
+
+        if bull_flip and trend[i-1] == -1 and bars_since_flip >= min_flip_bars:
+            trend[i]        = 1
+            bars_since_flip = 0
+        elif bear_flip and trend[i-1] == 1 and bars_since_flip >= min_flip_bars:
+            trend[i]        = -1
+            bars_since_flip = 0
         else:
-            final_upper.iat[i] = upper_band.iat[i]
+            trend[i]        = trend[i-1]
+            bars_since_flip += 1
 
-        if close.iat[i-1] >= final_lower.iat[i-1] - eps:
-            final_lower.iat[i] = max(lower_band.iat[i], final_lower.iat[i-1])
-        else:
-            final_lower.iat[i] = lower_band.iat[i]
+    df['SUPERTREND'] = trend
+    df['ST_UPPER']   = final_upper
+    df['ST_LOWER']   = final_lower
 
-        # stable trend flip detection
-        if close.iat[i] > final_upper.iat[i-1] + eps:
-            trend.iat[i] = 1
-        elif close.iat[i] < final_lower.iat[i-1] - eps:
-            trend.iat[i] = -1
-        else:
-            trend.iat[i] = trend.iat[i-1]
-
-    df['SUPERTREND'] = trend.astype(int)
     return df
 
 def supertrend_htf(df, htf_df, period=10, multiplier=3):
@@ -768,7 +991,7 @@ def compute_htf_scores(htf_df,
     htf = htf_df.copy()
 
     # ── 1. DIRECTION ─────────────────────────────────────────────
-    htf = supertrend(htf, period=10, multiplier=3)
+    htf = supertrend(htf, period=20, multiplier=3, flip_margin_atr=0.15, min_flip_bars=3)
     htf['HTF_DIRECTION'] = htf['SUPERTREND']
 
     # ── 2. VOL SCORE ─────────────────────────────────────────────
@@ -823,16 +1046,12 @@ def compute_htf_scores(htf_df,
 
 
 def align_htf_scores(htf_scores, df, is_live=False):
-    """
-    Cheap alignment step — reindex precomputed HTF scores onto LTF index.
-    Run this every hour. htf_scores comes from compute_htf_scores (cached).
-
-    No shift applied — lookahead prevention is handled upstream by excluding
-    the open 4H bar from htf_df before compute_htf_scores is called.
-    Shifting here would cause backtest to lag one full 4H bar behind live,
-    creating the quality divergence seen in Telegram vs backtest output.
-    """
-    aligned = htf_scores.reindex(df.index, method='ffill')
+    # htf_scores is indexed on bar OPEN times (e.g. 16:00 UTC)
+    # but the score is only valid after the bar CLOSES (e.g. 20:00 UTC)
+    # so we reindex the scores to their close times before aligning
+    htf_scores_copy = htf_scores.copy()
+    htf_scores_copy.index = htf_scores_copy.index + pd.Timedelta(hours=4)
+    aligned = htf_scores_copy.reindex(df.index, method='ffill')
     return aligned.fillna(0)
 
 
@@ -1011,15 +1230,15 @@ def pullback_entry(df):
     bear_close = df['close'] < df['open']
 
     df['PBPE_PULLBACK_LONG'] = (
-        df['BREAKOUT_WINDOW_LONG'] &
-        ideal_pullback_long &
-        bull_close
+        df['BREAKOUT_WINDOW_LONG'] 
+        # ideal_pullback_long 
+        # bull_close
     )
 
     df['PBPE_PULLBACK_SHORT'] = (
-        df['BREAKOUT_WINDOW_SHORT'] &
-        ideal_pullback_short &
-        bear_close
+        df['BREAKOUT_WINDOW_SHORT'] 
+        # ideal_pullback_short 
+        # bear_close
     )
 
     return df
@@ -1073,13 +1292,13 @@ def post_breakout_entry(df):
 
     # 4) final execution signal
     df['ENTRY_LONG'] = (
-        df['PBPE_PULLBACK_LONG'] &
-        df['PBPE_MICRO_LONG']
+        df['BULL_CONT'] 
+        # df['PBPE_MICRO_LONG']
     )
 
     df['ENTRY_SHORT'] = (
-        df['PBPE_PULLBACK_SHORT'] &
-        df['PBPE_MICRO_SHORT']
+        df['BEAR_CONT'] 
+        # df['PBPE_MICRO_SHORT']
     )
 
     return df
@@ -1152,14 +1371,19 @@ _EWMA_LOCK = threading.Lock()
 
 def _ewma_zscore_series(series: pd.Series,
                         alpha: float = 0.05,
-                        min_periods: int = 30) -> pd.Series:
+                        min_periods: int = 30,
+                        adaptive: bool = True) -> pd.Series:
     """
-    Fully recursive online z-score. No rolling windows.
-    Identical output whether run bar-by-bar (live) or on full series (backtest).
+    Adaptive recursive online z-score.
 
-        mu_t  = mu_{t-1}  + alpha * (x_t - mu_{t-1})
-        var_t = (1-alpha) * var_{t-1} + alpha * (x_t - mu_t)²
-        z_t   = (x_t - mu_t) / sqrt(var_t)
+    When adaptive=True, alpha scales with recent volatility of the series
+    itself — faster adaptation in volatile regimes, slower in quiet ones.
+    This prevents long-history baseline compression where 6 years of data
+    causes recent signals to normalize against an overly broad baseline.
+
+    alpha range: [alpha * 0.5, alpha * 3.0]
+    — floor prevents memory from becoming infinite
+    — ceiling prevents alpha from exploding in shock regimes
     """
     values = series.to_numpy(dtype=float)
     n = len(values)
@@ -1169,15 +1393,36 @@ def _ewma_zscore_series(series: pd.Series,
     mu  = np.nan
     var = np.nan
 
+    # short-term variance tracker for adaptive alpha
+    recent_var = np.nan
+    alpha_fast = alpha * 4.0  # faster EWM for recent vol estimate
+
     for i, x in enumerate(values):
         if np.isnan(x):
             continue
+
         if np.isnan(mu):
             mu  = x
             var = 0.0
+            recent_var = 0.0
             continue
-        mu  = mu  + alpha * (x - mu)
-        var = (1.0 - alpha) * var + alpha * (x - mu) ** 2
+
+        # ── adaptive alpha ────────────────────────────────────
+        if adaptive and not np.isnan(recent_var) and var > 1e-12:
+            # how much does recent volatility differ from long-run vol?
+            vol_ratio = np.sqrt(recent_var / var) if var > 1e-12 else 1.0
+            vol_ratio = np.clip(vol_ratio, 0.5, 3.0)
+            effective_alpha = np.clip(alpha * vol_ratio, alpha * 0.5, alpha * 3.0)
+        else:
+            effective_alpha = alpha
+
+        # ── update long-run state ─────────────────────────────
+        mu  = mu  + effective_alpha * (x - mu)
+        var = (1.0 - effective_alpha) * var + effective_alpha * (x - mu) ** 2
+
+        # ── update short-run variance (for next bar's alpha) ──
+        recent_var = (1.0 - alpha_fast) * recent_var + alpha_fast * (x - mu) ** 2
+
         if i >= min_periods:
             std = np.sqrt(var) if var > 1e-12 else 1e-6
             out[i] = (x - mu) / std
@@ -1326,27 +1571,73 @@ def volatility_regime_index(df, fast=200, slow=2000):
 # EXPANSION MATURITY MODEL (replaces impulse_age)
 # ==========================================================
 def expansion_maturity(df, lookback=20):
+    """
+    Replaces the 6-layer abstraction chain with two direct
+    primitive reads that are closer to actual market observables.
 
-    expansion_raw = (
-        0.4 * df['ATR_ACCEL_NORM'] +
-        0.3 * df['FLOW_STRENGTH']  +
-        0.3 * df['TREND_QUALITY']
+    OLD: tanh(EWM(composite(ATR_ACCEL_NORM, FLOW_STRENGTH, TREND_QUALITY)))
+         — 4+ layers deep, measures its own smoothed history
+
+    NEW: asks two questions directly from raw market data
+         1. Is volatility actually expanding right now? (VER vs baseline)
+         2. Is participation confirming the move? (FLOW_STRENGTH directly)
+
+    EARLY_EXPANSION = True when expansion is nascent, not mature.
+    We want to enter early — before the move is obvious.
+    A mature expansion (high EXPANSION_MATURITY) was the wrong
+    signal to gate on anyway; that's entering late.
+    """
+
+    # --------------------------------------------------
+    # 1. DIRECT VOLATILITY EXPANSION CHECK
+    # VER is already computed upstream — use it raw.
+    # Is the current bar's volatility above its own slow baseline?
+    # This is a 2-layer read: raw ATR → VER ratio.
+    # Far shallower than the old chain.
+    # --------------------------------------------------
+    ver_expanding = df['VER'] > df['VOL_EXPAND_TH']
+
+    # How long has expansion been running?
+    # Count consecutive bars of expansion — simple forward counter.
+    # Same pattern as COMPRESSION_BARS, which already works.
+    expanding = ver_expanding.astype(int)
+    expansion_bars = pd.Series(0, index=df.index)
+    for idx in range(1, len(df)):
+        if expanding.iloc[idx] == 1:
+            expansion_bars.iloc[idx] = expansion_bars.iloc[idx - 1] + 1
+        else:
+            expansion_bars.iloc[idx] = 0
+    df['EXPANSION_BARS'] = expansion_bars
+
+    # --------------------------------------------------
+    # 2. DIRECT FLOW CONFIRMATION
+    # FLOW_STRENGTH is already computed in participation_state().
+    # Read it directly — no re-smoothing, no re-compositing.
+    # --------------------------------------------------
+    flow_confirming = df['FLOW_STRENGTH'].abs() > 0.3
+
+    # --------------------------------------------------
+    # 3. EARLY_EXPANSION DEFINITION
+    # Early = expansion just started (few bars in)
+    #       AND flow is actually confirming
+    # Late  = expansion has been running a long time
+    #       OR flow has already faded
+    #
+    # Threshold of 8 bars = 8 hours at 1H.
+    # After 8 bars of sustained expansion, the move is
+    # no longer early — you're chasing.
+    # --------------------------------------------------
+    df['EARLY_EXPANSION'] = (
+        # (df['EXPANSION_BARS'] <= 8) &
+        # (df['EXPANSION_BARS'] >= 1) |
+        flow_confirming
     )
 
-    df['EXPANSION_STATE']       = expansion_raw.ewm(span=5).mean()
-    df['EXPANSION_VELOCITY']    = df['EXPANSION_STATE'].diff()
-
-    # EWM persistence — recursive, no rolling mean cliff
-    df['EXPANSION_PERSISTENCE'] = df['EXPANSION_STATE'].ewm(
-        span=lookback, adjust=False
-    ).mean()
-
-    # tanh squash replaces expanding min/max — bounded, causal, live-consistent
-    df['EXPANSION_MATURITY'] = (
-        (np.tanh(df['EXPANSION_PERSISTENCE'] * 2.0) + 1) / 2
-    ).clip(0, 1)
-
-    df['EARLY_EXPANSION'] = df['EXPANSION_MATURITY'] < 0.6
+    # Keep EXPANSION_STATE for anything downstream that reads it
+    # but make it a simple normalized bar count rather than
+    # a deep composite — honest about what it is.
+    df['EXPANSION_STATE'] = (df['EXPANSION_BARS'] / 8).clip(0, 1)
+    df['EXPANSION_MATURITY'] = df['EXPANSION_STATE']  # backward compat
 
     return df
 
@@ -1398,10 +1689,10 @@ def entry_location_filter(df, lookback=20):
     df['ENTRY_PERCENTILE'] = (df['close'] - rolling_low) / (rolling_range + 1e-9)
 
     # Longs: not too extended to the upside
-    df['LOCATION_LONG_OK']  = df['ENTRY_PERCENTILE'] < 0.60
+    df['LOCATION_LONG_OK']  = df['ENTRY_PERCENTILE'] < 0.70
 
     # Shorts: not too extended to the downside
-    df['LOCATION_SHORT_OK'] = df['ENTRY_PERCENTILE'] > 0.40
+    df['LOCATION_SHORT_OK'] = df['ENTRY_PERCENTILE'] > 0.30
 
     return df
 
@@ -1425,11 +1716,11 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     # =========================
     # Core processing
     # =========================
-    df = trend_bias(df)
+    df = positioning_pressure(df)
     df = wick_rejection(df)
     df = volume_confirmation(df)
     df = support_resistance(df)
-    df = breakout_logic(df)
+    df = liquidity_displacement(df)
 
     df['ATR'] = atr_ema(df, period=14)
 
@@ -1473,18 +1764,17 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
 
     df = pd.concat([df, htf_stack], axis=1)
 
-    HTF_QUALITY_TH = 0.45  # tune 0.40–0.60
+    htf_quality_baseline = df['HTF_QUALITY'].ewm(span=2000, adjust=False).mean()
+    htf_quality_th       = (htf_quality_baseline * 1.05).clip(lower=0.30)
 
     HTF_LONG_OK = (
-        (df['HTF_DIRECTION'] == 1) &
-        (df['HTF_QUALITY'] > HTF_QUALITY_TH) &
-        (df['LTF_DIRECTION'] == 1)   # 1H trend must agree with 4H
+        # (df['HTF_DIRECTION'] == 1) |
+        (df['LTF_DIRECTION'] == 1)
     )
 
     HTF_SHORT_OK = (
-        (df['HTF_DIRECTION'] == -1) &
-        (df['HTF_QUALITY'] > HTF_QUALITY_TH) &
-        (df['LTF_DIRECTION'] == -1)  # 1H trend must agree with 4H
+        # (df['HTF_DIRECTION'] == -1) |
+        (df['LTF_DIRECTION'] == -1)
     )
 
     # =========================
@@ -1499,23 +1789,23 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     SHORT_CONDITION = (df['VALID_BREAK_SHORT'])
 
     df['ENTRY_LONG'] = (
-        df['ENTRY_LONG'] |
-        df['COMPRESSION_OK'] 
+        df['ENTRY_LONG'] 
+        # df['COMPRESSION_OK'] 
     )
 
     df['ENTRY_SHORT'] = (
-        df['ENTRY_SHORT'] |
-        df['COMPRESSION_OK'] 
+        df['ENTRY_SHORT'] 
+        # df['COMPRESSION_OK'] 
     )
 
-    LONG_CONDITION &= df['ENTRY_LONG']
-    SHORT_CONDITION &= df['ENTRY_SHORT']
+    # LONG_CONDITION &= df['ENTRY_LONG']
+    # SHORT_CONDITION &= df['ENTRY_SHORT']
 
-    LONG_CONDITION &= HTF_LONG_OK
-    SHORT_CONDITION &= HTF_SHORT_OK
+    # LONG_CONDITION &= HTF_LONG_OK
+    # SHORT_CONDITION &= HTF_SHORT_OK
 
-    LONG_CONDITION  &= df['LOCATION_LONG_OK']
-    SHORT_CONDITION &= df['LOCATION_SHORT_OK']
+    # LONG_CONDITION  &= df['LOCATION_LONG_OK']
+    # SHORT_CONDITION &= df['LOCATION_SHORT_OK']
 
     df['signal'] = 0
     df.loc[LONG_CONDITION, 'signal'] = 1
