@@ -623,6 +623,20 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     flow_bias_long  = close_location_bias > 0.6
     flow_bias_short = close_location_bias < 0.4
 
+    df['VALID_BREAK_LONG'] = (
+        df['EARLY_EXPANSION'] &
+        volume_confirmed &
+        flow_bias_long &
+        df['MICRO_BREAK_LONG']
+    )
+
+    df['VALID_BREAK_SHORT'] = (
+        df['EARLY_EXPANSION'] &
+        volume_confirmed &
+        flow_bias_short &
+        df['MICRO_BREAK_SHORT']
+    )
+
     _l = df.iloc[-1]
     print(
         f"[SIGNAL GATE] "
@@ -636,22 +650,6 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
         f"(flow_bias_long={int(flow_bias_long.iloc[-1])} flow_bias_short={int(flow_bias_short.iloc[-1])}) | "
         f"VALID_BREAK_LONG={int(_l['VALID_BREAK_LONG'])} "
         f"VALID_BREAK_SHORT={int(_l['VALID_BREAK_SHORT'])}"
-    )
-
-    df['VALID_BREAK_LONG'] = (
-        # compression_ok &
-        df['EARLY_EXPANSION'] &
-        volume_confirmed &
-        flow_bias_long &
-        df['MICRO_BREAK_LONG']
-    )
-
-    df['VALID_BREAK_SHORT'] = (
-        # compression_ok &
-        df['EARLY_EXPANSION'] &
-        volume_confirmed &
-        flow_bias_short &
-        df['MICRO_BREAK_SHORT']
     )
 
     df['BARS_SINCE_LONG_BREAK']  = bars_since_event(df['VALID_BREAK_LONG'])
