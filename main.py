@@ -96,12 +96,12 @@ def fetch_binance(symbol, interval, limit):
 # CONFIG 
 # ==========================================================
 # SYMBOLS = [
-#     "ETHUSDT", "BNBUSDT", "AVAXUSDT", "BCHUSDT", "AAVEUSDT", "XLMUSDT", 
-#     "SUIUSDT", "FILUSDT", "LINKUSDT", "LDOUSDT", "SNXUSDT", "RUNEUSDT", 
-#     "ORDIUSDT", "CRVUSDT", "ADAUSDT", "TIAUSDT", "SOLUSDT", "ICPUSDT", 
+#     "AXSUSDT", "XRPUSDT", "AVAXUSDT", "DOTUSDT", "AAVEUSDT", "XLMUSDT", 
+#     "SUIUSDT", "VETUSDT", "TRXUSDT", "LDOUSDT", "INJUSDT", "RUNEUSDT", 
+#     "ORDIUSDT", "ADAUSDT", "ZENUSDT", "TIAUSDT", "OPUSDT", "ICPUSDT", 
 #     "PAXGUSDT", "TRBUSDT"
-# ] 
-SYMBOL = "ETHUSDT"
+# ]
+SYMBOL = "USDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -314,6 +314,7 @@ def fetch_binance_range(symbol, interval, start, end):
 
 print("Loading LLTF data (5m)...")
 lltf_df = load_or_fetch(SYMBOL, LLTF_INTERVAL, LLTF_LIMIT, now_utc)
+print(f"lltf_df last bar: {lltf_df.index[-1]}")
 
 print("Loading LTF data (1h)...")
 ltf_df = load_or_fetch(SYMBOL, LTF_INTERVAL, LTF_LIMIT, now_utc)
@@ -375,47 +376,47 @@ diagnostics_df = diagnose_trades(trade_log)
 # ==========================================================
 # HTF QUALITY DIAGNOSTIC — last 30 hours
 # ==========================================================
-print("\n=== HTF QUALITY (last 30 bars) ===")
-print(f"{'timestamp':>25} {'HTF_DIR':>8} {'HTF_QUAL':>10} {'signal':>8} {'final_sig':>10}")
-print("-" * 65)
+# print("\n=== HTF QUALITY (last 30 bars) ===")
+# print(f"{'timestamp':>25} {'HTF_DIR':>8} {'HTF_QUAL':>10} {'signal':>8} {'final_sig':>10}")
+# print("-" * 65)
 
-diag_cols = ["HTF_DIRECTION", "HTF_QUALITY", "signal", "final_signal"]
-available = [c for c in diag_cols if c in ltf_df.columns]
+# diag_cols = ["HTF_DIRECTION", "HTF_QUALITY", "signal", "final_signal"]
+# available = [c for c in diag_cols if c in ltf_df.columns]
 
-now_utc = pd.Timestamp.now(tz="UTC")
-last_closed_1h = now_utc.floor("h") - pd.Timedelta(hours=1)
-hours_into_4h = last_closed_1h.hour % 4
-last_closed_4h_boundary = last_closed_1h - pd.Timedelta(hours=hours_into_4h)
-diag = ltf_df[available][ltf_df.index <= last_closed_1h].tail(30)
+# now_utc = pd.Timestamp.now(tz="UTC")
+# last_closed_1h = now_utc.floor("h") - pd.Timedelta(hours=1)
+# hours_into_4h = last_closed_1h.hour % 4
+# last_closed_4h_boundary = last_closed_1h - pd.Timedelta(hours=hours_into_4h)
+# diag = ltf_df[available][ltf_df.index <= last_closed_1h].tail(30)
 
-for ts, row in diag.iterrows():
-    htf_dir  = int(row["HTF_DIRECTION"])  if "HTF_DIRECTION"  in row.index else "N/A"
-    htf_qual = f"{row['HTF_QUALITY']:.4f}" if "HTF_QUALITY"    in row.index else "N/A"
-    sig      = int(row["signal"])          if "signal"          in row.index else "N/A"
-    fsig     = int(row["final_signal"])    if "final_signal"    in row.index else "N/A"
+# for ts, row in diag.iterrows():
+#     htf_dir  = int(row["HTF_DIRECTION"])  if "HTF_DIRECTION"  in row.index else "N/A"
+#     htf_qual = f"{row['HTF_QUALITY']:.4f}" if "HTF_QUALITY"    in row.index else "N/A"
+#     sig      = int(row["signal"])          if "signal"          in row.index else "N/A"
+#     fsig     = int(row["final_signal"])    if "final_signal"    in row.index else "N/A"
 
-    import pytz
-    WAT = pytz.timezone("Africa/Lagos")
-    ts_wat = ts.tz_convert(WAT).strftime("%Y-%m-%d %H:%M WAT")
+#     import pytz
+#     WAT = pytz.timezone("Africa/Lagos")
+#     ts_wat = ts.tz_convert(WAT).strftime("%Y-%m-%d %H:%M WAT")
 
-    blocked = " ← NO HTF DATA" if (htf_qual == "nan" or htf_qual == "N/A") else (" ← BLOCKED" if float(htf_qual) <= 0.45 else "")
-    print(f"{ts_wat:>25} {str(htf_dir):>8} {htf_qual:>10} {str(sig):>8} {str(fsig):>10}{blocked}")
+#     blocked = " ← NO HTF DATA" if (htf_qual == "nan" or htf_qual == "N/A") else (" ← BLOCKED" if float(htf_qual) <= 0.45 else "")
+#     print(f"{ts_wat:>25} {str(htf_dir):>8} {htf_qual:>10} {str(sig):>8} {str(fsig):>10}{blocked}")
 
-print(f"\nHTF threshold: 0.45")
-print(f"Last HTF_DIRECTION : {int(ltf_df['HTF_DIRECTION'].iloc[-1])}")
-print(f"Last HTF_QUALITY   : {ltf_df['HTF_QUALITY'].iloc[-1]:.4f}")
-print(f"Last final_signal  : {int(ltf_df['final_signal'].iloc[-1])}")
+# print(f"\nHTF threshold: 0.45")
+# print(f"Last HTF_DIRECTION : {int(ltf_df['HTF_DIRECTION'].iloc[-1])}")
+# print(f"Last HTF_QUALITY   : {ltf_df['HTF_QUALITY'].iloc[-1]:.4f}")
+# print(f"Last final_signal  : {int(ltf_df['final_signal'].iloc[-1])}")
 
-# Add this to your backtest script after computing scores
-from indicators.indicators import compute_htf_scores
-scores = compute_htf_scores(htf_df)
-print("Backtest HTF last 5 bars:")
-print(scores.tail(5))
-print("HTF_QUALITY last value:", scores['HTF_QUALITY'].iloc[-1])
+# # Add this to your backtest script after computing scores
+# from indicators.indicators import compute_htf_scores
+# scores = compute_htf_scores(htf_df)
+# print("Backtest HTF last 5 bars:")
+# print(scores.tail(5))
+# print("HTF_QUALITY last value:", scores['HTF_QUALITY'].iloc[-1])
 
-print(f"[DEBUG] backtest htf_df last={htf_df.index[-1]} len={len(htf_df)}")
-for _ts, _row in htf_df.tail(3).iterrows():
-    print(f"[DEBUG HTF BAR] {_ts} | open={_row['open']:.4f} close={_row['close']:.4f} volume={_row['volume']:.2f}")
+# print(f"[DEBUG] backtest htf_df last={htf_df.index[-1]} len={len(htf_df)}")
+# for _ts, _row in htf_df.tail(3).iterrows():
+#     print(f"[DEBUG HTF BAR] {_ts} | open={_row['open']:.4f} close={_row['close']:.4f} volume={_row['volume']:.2f}")
 
 # # ── 5m candle dump per trade ────────────────────────────────
 # print("\n=== 5M CANDLES PER TRADE ===")

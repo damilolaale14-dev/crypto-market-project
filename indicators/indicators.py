@@ -593,14 +593,20 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     vol_baseline     = df['VOL_RATIO'].ewm(span=500, adjust=False).mean()
     volume_confirmed = df['VOL_RATIO'] > vol_baseline * 1.15
 
+    _l = df.iloc[-1]
+
     print(
-        f"[BREAKOUT GATE] "
-        f"compression_ok={int(compression_ok.iloc[-1])} "
-        f"(COMPRESSION_BARS={int(df['COMPRESSION_BARS'].iloc[-1])}) | "
-        f"EARLY_EXPANSION={int(df['EARLY_EXPANSION'].iloc[-1])} "
-        f"(FLOW_STRENGTH={df['FLOW_STRENGTH'].iloc[-1]:.4f}) | "
-        f"volume_confirmed={int(volume_confirmed.iloc[-1])} "
-        f"(VOL_RATIO={df['VOL_RATIO'].iloc[-1]:.4f} baseline={vol_baseline.iloc[-1]:.4f})"
+        f"[SIGNAL GATE] "
+        f"EARLY_EXPANSION={int(_l['EARLY_EXPANSION'])} "
+        f"(FLOW_STRENGTH={_l['FLOW_STRENGTH']:.4f}) | "
+        f"volume_confirmed={int(_l['VOL_RATIO'] > vol_baseline.iloc[-1] * 1.15)} "
+        f"(VOL_RATIO={_l['VOL_RATIO']:.4f} baseline={vol_baseline.iloc[-1]:.4f}) | "
+        f"MICRO_BREAK_LONG={int(_l['MICRO_BREAK_LONG'])} "
+        f"MICRO_BREAK_SHORT={int(_l['MICRO_BREAK_SHORT'])} | "
+        f"close_location_bias={close_location_bias.iloc[-1]:.3f} "
+        f"(flow_bias_long={int(flow_bias_long.iloc[-1])} flow_bias_short={int(flow_bias_short.iloc[-1])}) | "
+        f"VALID_BREAK_LONG={int(_l['VALID_BREAK_LONG'])} "
+        f"VALID_BREAK_SHORT={int(_l['VALID_BREAK_SHORT'])}"
     )
     
     displacement_ok = df['DISPLACEMENT_SCORE'] > 0.15
@@ -610,17 +616,43 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     displacement_short_ok = (
         df['BREAK_SUPPORT'] | (df['DISPLACEMENT_SCORE'] > 0.45)
     )
+    # Close location bias during compression
+    # Where is price closing within the local compression range?
+    # Consistently high closes = buyers winning inside the box = long bias
+    # Consistently low closes = sellers winning inside the box = short bias
+
+    comp_lookback = 10  # same order as compression detection
+
+    comp_high = df['high'].rolling(comp_lookback).max()
+    comp_low  = df['low'].rolling(comp_lookback).min()
+    comp_range = comp_high - comp_low
+
+    # 0 = closed at bottom of range, 1 = closed at top
+    close_location = (df['close'] - comp_low) / (comp_range + 1e-9)
+
+    # Smooth it — we want the drift over the compression, not a single bar
+    close_location_bias = close_location.rolling(comp_lookback).mean()
+
+    # Above 0.55 = consistently closing in upper half = long bias
+    # Below 0.45 = consistently closing in lower half = short bias
+    # Between 0.45-0.55 = genuinely ambiguous, no trade
+    flow_bias_long  = close_location_bias > 0.6
+    flow_bias_short = close_location_bias < 0.4
 
     df['VALID_BREAK_LONG'] = (
-        compression_ok &
+        # compression_ok &
         df['EARLY_EXPANSION'] &
-        volume_confirmed 
+        volume_confirmed &
+        flow_bias_long &
+        df['MICRO_BREAK_LONG']
     )
 
     df['VALID_BREAK_SHORT'] = (
-        compression_ok &
+        # compression_ok &
         df['EARLY_EXPANSION'] &
-        volume_confirmed 
+        volume_confirmed &
+        flow_bias_short &
+        df['MICRO_BREAK_SHORT']
     )
 
     df['BARS_SINCE_LONG_BREAK']  = bars_since_event(df['VALID_BREAK_LONG'])
@@ -1624,7 +1656,7 @@ def expansion_maturity(df, lookback=20):
     # FLOW_STRENGTH is already computed in participation_state().
     # Read it directly — no re-smoothing, no re-compositing.
     # --------------------------------------------------
-    flow_confirming = df['FLOW_STRENGTH'].abs() > 0.3
+    flow_confirming = df['FLOW_STRENGTH'].abs() > 0.6
 
     # --------------------------------------------------
     # 3. EARLY_EXPANSION DEFINITION
@@ -1753,6 +1785,7 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     df = composite_pressure(df)  # 🔹 generate COMPOSITE_PRESSURE metric
     df = pressure_elasticity_divergence(df)
     df = vol_compression_slope(df, lookback=50, rv_period=20)
+    df = micro_consolidation(df)
     df = validated_breakouts(df)
     df = entry_freshness(df)
     df = compression_context(df)
@@ -1791,7 +1824,6 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     # PREDICTIVE MODULES
     # =========================
     df = transition_detector(df)
-    df = micro_consolidation(df)
     df = momentum_continuity(df)
     df = post_breakout_entry(df)
     
@@ -1799,13 +1831,13 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     SHORT_CONDITION = (df['VALID_BREAK_SHORT'])
 
     df['ENTRY_LONG'] = (
-        df['ENTRY_LONG'] 
-        # df['COMPRESSION_OK'] 
+        # df['ENTRY_LONG'] 
+        df['COMPRESSION_OK'] 
     )
 
     df['ENTRY_SHORT'] = (
-        df['ENTRY_SHORT'] 
-        # df['COMPRESSION_OK'] 
+        # df['ENTRY_SHORT'] 
+        df['COMPRESSION_OK'] 
     )
 
     # LONG_CONDITION &= df['ENTRY_LONG']
@@ -1862,9 +1894,9 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     # ================= DEBUG SIGNAL SUMMARY =================
     signal_count = (df["final_signal"] != 0).sum()
 
-    print(
-        f"[DBG-GEN] candles={len(df)} | signals={signal_count} | "
-        f"first={df.index[0]} | last={df.index[-1]}"
-    )
+    # print(
+    #     f"[DBG-GEN] candles={len(df)} | signals={signal_count} | "
+    #     f"first={df.index[0]} | last={df.index[-1]}"
+    # )
 
     return df

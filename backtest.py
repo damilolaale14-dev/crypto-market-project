@@ -82,8 +82,19 @@ class SignalBacktester:
 
                 mask = (self.lltf_df.index >= start) & (self.lltf_df.index < end)
 
-                self.lltf_df.loc[mask, 'final_signal'] = self.df['final_signal'].iloc[i]
+                # ltf_index and signal both come from THIS 1H bar (index i).
+                # This matches live: map_ltf_to_htf maps the 13:00 5m bar to
+                # the 13:00 1H bar, and the signal on df at 13:00 is used.
+                # The 13:00 5m bar is the first bar AFTER the 12:00 1H bar closes —
+                # no lookahead, because generate_signal only runs on closed bars.
+                # We zero bars strictly inside (13:05–13:55) — those are mid-bar.
+                # Only the boundary bar (13:00) is a valid entry.
                 self.lltf_df.loc[mask, 'ltf_index'] = i
+                # Boundary bar (start) gets the signal; interior bars are zeroed
+                boundary_mask = self.lltf_df.index == start
+                interior_mask = mask & ~boundary_mask
+                self.lltf_df.loc[boundary_mask & mask, 'final_signal'] = self.df['final_signal'].iloc[i]
+                self.lltf_df.loc[interior_mask, 'final_signal'] = 0
 
             # Drop any candles that STILL didn't get mapped (safety)
             self.lltf_df = self.lltf_df.dropna(subset=['ltf_index'])
@@ -131,7 +142,13 @@ class SignalBacktester:
 
     def get_5m_window(self, entry_time, current_time):
         df = self.lltf_df if hasattr(self, 'lltf_df') else self.df
-        return df.loc[entry_time:current_time]
+        # Exclude the entry bar itself — OIE should only evaluate bars
+        # after entry, matching live where bar_history starts appending
+        # from the first bar AFTER the entry candle.
+        window = df.loc[entry_time:current_time]
+        if len(window) > 1:
+            return window.iloc[1:]  # drop entry bar
+        return window
     
     def opposite_impulse_exit(self, window, side, trade=None):
         if len(window) < 3:
@@ -278,15 +295,19 @@ class SignalBacktester:
     # ------------------------
     # Entry
     # ------------------------
-    def _enter(self, side, price, idx, align_to_ltf_open=False):
-        ltf_idx = self.lltf_df['ltf_index'].iloc[idx] if hasattr(self, 'lltf_df') else idx
-        atr = self.df['ATR'].iloc[ltf_idx]
+    def _enter(self, side, price, idx):
+        if hasattr(self, 'lltf_df'):
+            ltf_idx = self.lltf_df['ltf_index'].iloc[idx]
+            # ATR for stop placement comes from the bar that generated the signal
+            # (the previous closed 1H bar) — matches live where ATR is forward-filled
+            # from the last closed 1H bar onto the entry 5m bar.
+            atr_idx = max(0, ltf_idx - 1)
+        else:
+            ltf_idx = idx
+            atr_idx = idx
+        atr = self.df['ATR'].iloc[atr_idx]
         if np.isnan(atr):
             return
-
-        # Align entry price to parent 1h candle open
-        if align_to_ltf_open and hasattr(self, 'df'):
-            price = self.df['open'].iloc[ltf_idx]
 
         if side == 1:
             stop = price - self.atr_mult * atr
@@ -314,7 +335,11 @@ class SignalBacktester:
             "initial_stop": stop,
             "ATR": atr,
             "MAE": 0.0,
-            "MFE": 0.0
+            "MFE": 0.0,
+            "bars_in_trade": 1,   # entry bar counts as bar 1, matching live
+            "last_trail_bar": 0,
+            "mfe_r": 0.0,
+            "pnl_r": 0.0,
         }
 
         # Fee applies to notional, not margin — so leverage increases fee cost
@@ -544,16 +569,15 @@ class SignalBacktester:
 
         trade["pnl_r"] = pnl_r
         trade["mfe_r"] = mfe_r
-        trade["bars_in_trade"] = trade.get("bars_in_trade", 0) + 1
 
         # ── 5m window for exit checks ──────────────────────────
         window_5m = self.get_5m_window(trade["entry_time"], current_time)
 
         # ── DYNAMIC TRAILING STOP (mirrors lifecycle.py) ───────
         if "ATR_5M" in exec_df.columns:
-            atr = exec_df["ATR_5M"].iloc[max(0, idx-2):idx+1].mean()
+            atr = exec_df["ATR_5M"].iloc[idx]
         else:
-            atr = exec_df["ATR"].iloc[max(0, idx-2):idx+1].mean() * 0.20
+            atr = exec_df["ATR"].iloc[idx] * 0.20
         if pd.isna(atr) or atr <= 0:
             atr = R * 0.20  # last resort fallback
 
@@ -583,6 +607,9 @@ class SignalBacktester:
             self._exit(trade["stop_loss"], idx, "stop_loss")
             return
 
+        # increment AFTER all exit checks — matches lifecycle.py ordering
+        trade["bars_in_trade"] = trade.get("bars_in_trade", 0) + 1
+
     # ------------------------
     # Run backtest
     # ------------------------
@@ -611,9 +638,9 @@ class SignalBacktester:
             # 2. ENTER (only one trade allowed per 1H candle)
             if self.position == 0 and not self.trade_taken_this_ltf:
                 if signal == 1:
-                    self._enter(1, o, i, align_to_ltf_open=True)
+                    self._enter(1, o, i)
                 elif signal == -1:
-                    self._enter(-1, o, i, align_to_ltf_open=True)
+                    self._enter(-1, o, i)
 
             # 3. Update excursions
             if self.position != 0:
@@ -638,20 +665,24 @@ class SignalBacktester:
         if not trades_df.empty:
             trades_df["direction"] = trades_df["side"].map({1: "LONG", -1: "SHORT"})
             trades_df["pnl_pct"]   = trades_df["pnl"] / self.initial_balance * 100
+            trades_df["truncated"] = trades_df["exit_reason"] == "end_of_data"
 
         liquidations = len(trades_df[trades_df["exit_reason"] == "liquidated"]) if not trades_df.empty else 0
 
+        valid_trades = trades_df[~trades_df["truncated"]] if not trades_df.empty else trades_df
+
         summary = {
-            "initial_balance": self.initial_balance,
-            "final_balance":   round(self.balance, 2),
-            "net_profit":      round(self.balance - self.initial_balance, 2),
-            "return_pct":      round((self.balance / self.initial_balance - 1) * 100, 2),
-            "total_trades":    len(trades_df),
-            "win_rate":        round((trades_df["pnl"] > 0).mean() * 100, 2) if not trades_df.empty else 0.0,
-            "avg_win":         trades_df.loc[trades_df["pnl"] > 0, "pnl"].mean() if not trades_df.empty else 0.0,
-            "avg_loss":        trades_df.loc[trades_df["pnl"] < 0, "pnl"].mean() if not trades_df.empty else 0.0,
-            "leverage":        self.leverage,
-            "liquidations":    liquidations,
+            "initial_balance":  self.initial_balance,
+            "final_balance":    round(self.balance, 2),
+            "net_profit":       round(self.balance - self.initial_balance, 2),
+            "return_pct":       round((self.balance / self.initial_balance - 1) * 100, 2),
+            "total_trades":     len(valid_trades),
+            "truncated_trades": len(trades_df) - len(valid_trades),
+            "win_rate":         round((valid_trades["pnl"] > 0).mean() * 100, 2) if not valid_trades.empty else 0.0,
+            "avg_win":          valid_trades.loc[valid_trades["pnl"] > 0, "pnl"].mean() if not valid_trades.empty else 0.0,
+            "avg_loss":         valid_trades.loc[valid_trades["pnl"] < 0, "pnl"].mean() if not valid_trades.empty else 0.0,
+            "leverage":         self.leverage,
+            "liquidations":     liquidations,
         }
 
         return {

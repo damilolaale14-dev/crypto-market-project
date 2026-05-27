@@ -19,11 +19,11 @@ def _tg_debug(msg: str) -> None:
         print(f"[TG DEBUG FALLBACK] {msg}")
 
 SYMBOLS = [
-    "ETHUSDT", "BNBUSDT", "AVAXUSDT", "BCHUSDT", "AAVEUSDT", "XLMUSDT", 
-    "SUIUSDT", "FILUSDT", "LINKUSDT", "LDOUSDT", "SNXUSDT", "RUNEUSDT", 
-    "ORDIUSDT", "CRVUSDT", "ADAUSDT", "TIAUSDT", "SOLUSDT", "ICPUSDT", 
+    "AXSUSDT", "XRPUSDT", "AVAXUSDT", "DOTUSDT", "AAVEUSDT", "XLMUSDT", 
+    "SUIUSDT", "VETUSDT", "TRXUSDT", "LDOUSDT", "INJUSDT", "RUNEUSDT", 
+    "ORDIUSDT", "ADAUSDT", "ZENUSDT", "TIAUSDT", "OPUSDT", "ICPUSDT", 
     "PAXGUSDT", "TRBUSDT"
-] 
+]
 
 SIGNAL_STORE       = "data/signals.json"
 HOUR_MEMORY_FILE = "data/last_hour_seen.json"
