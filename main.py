@@ -101,7 +101,7 @@ def fetch_binance(symbol, interval, limit):
 #     "ORDIUSDT", "ADAUSDT", "ZENUSDT", "TIAUSDT", "OPUSDT", "ICPUSDT", 
 #     "PAXGUSDT", "TRBUSDT"
 # ]
-SYMBOL = "USDT"
+SYMBOL = "AAVEUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"

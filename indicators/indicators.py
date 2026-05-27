@@ -592,22 +592,6 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
 
     vol_baseline     = df['VOL_RATIO'].ewm(span=500, adjust=False).mean()
     volume_confirmed = df['VOL_RATIO'] > vol_baseline * 1.15
-
-    _l = df.iloc[-1]
-
-    print(
-        f"[SIGNAL GATE] "
-        f"EARLY_EXPANSION={int(_l['EARLY_EXPANSION'])} "
-        f"(FLOW_STRENGTH={_l['FLOW_STRENGTH']:.4f}) | "
-        f"volume_confirmed={int(_l['VOL_RATIO'] > vol_baseline.iloc[-1] * 1.15)} "
-        f"(VOL_RATIO={_l['VOL_RATIO']:.4f} baseline={vol_baseline.iloc[-1]:.4f}) | "
-        f"MICRO_BREAK_LONG={int(_l['MICRO_BREAK_LONG'])} "
-        f"MICRO_BREAK_SHORT={int(_l['MICRO_BREAK_SHORT'])} | "
-        f"close_location_bias={close_location_bias.iloc[-1]:.3f} "
-        f"(flow_bias_long={int(flow_bias_long.iloc[-1])} flow_bias_short={int(flow_bias_short.iloc[-1])}) | "
-        f"VALID_BREAK_LONG={int(_l['VALID_BREAK_LONG'])} "
-        f"VALID_BREAK_SHORT={int(_l['VALID_BREAK_SHORT'])}"
-    )
     
     displacement_ok = df['DISPLACEMENT_SCORE'] > 0.15
     displacement_long_ok  = (
@@ -638,6 +622,21 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
     # Between 0.45-0.55 = genuinely ambiguous, no trade
     flow_bias_long  = close_location_bias > 0.6
     flow_bias_short = close_location_bias < 0.4
+
+    _l = df.iloc[-1]
+    print(
+        f"[SIGNAL GATE] "
+        f"EARLY_EXPANSION={int(_l['EARLY_EXPANSION'])} "
+        f"(FLOW_STRENGTH={_l['FLOW_STRENGTH']:.4f}) | "
+        f"volume_confirmed={int(_l['VOL_RATIO'] > vol_baseline.iloc[-1] * 1.15)} "
+        f"(VOL_RATIO={_l['VOL_RATIO']:.4f} baseline={vol_baseline.iloc[-1]:.4f}) | "
+        f"MICRO_BREAK_LONG={int(_l['MICRO_BREAK_LONG'])} "
+        f"MICRO_BREAK_SHORT={int(_l['MICRO_BREAK_SHORT'])} | "
+        f"close_location_bias={close_location_bias.iloc[-1]:.3f} "
+        f"(flow_bias_long={int(flow_bias_long.iloc[-1])} flow_bias_short={int(flow_bias_short.iloc[-1])}) | "
+        f"VALID_BREAK_LONG={int(_l['VALID_BREAK_LONG'])} "
+        f"VALID_BREAK_SHORT={int(_l['VALID_BREAK_SHORT'])}"
+    )
 
     df['VALID_BREAK_LONG'] = (
         # compression_ok &
