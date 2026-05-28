@@ -342,115 +342,62 @@ class PositionManager:
         # =====================================================
         position = self.positions.get(symbol)
 
+        print(f"[ENTRY GATE] {symbol} not_position={not position} signal={signal}")
+
         if not position and signal != 0:
 
+            print(f"[ENTRY GATE 1] {symbol} just_unlocked={symbol in self._just_unlocked}")
             if symbol in self._just_unlocked:
-                _tg_debug(
-                    f"[ENTRY BLOCKED — JUST UNLOCKED] {symbol} "
-                    f"dir={signal} bar={current_ts}"
-                )
+                print(f"[ENTRY BLOCKED — JUST UNLOCKED] {symbol}")
                 return {"state": "FLAT"}
 
-            if symbol in self._just_unlocked:
-                _tg_debug(
-                    f"[ENTRY BLOCKED — JUST UNLOCKED] {symbol} "
-                    f"dir={signal} bar={current_ts}"
-                )
-                return {"state": "FLAT"}
+            print(f"[ENTRY GATE 2] {symbol} reentry_lock={self._reentry_lock.get(symbol)}")
+            if symbol in self._reentry_lock:
+                locked_dir = self._reentry_lock[symbol]
+                locked_at = self._reentry_lock_ts.get(symbol, "unknown")
+                current_1h = current_ts.floor("h") if hasattr(current_ts, "floor") else pd.Timestamp(current_ts).floor("h")
+                if isinstance(locked_at, pd.Timestamp):
+                    locked_1h = locked_at.floor("h")
+                    lock_still_valid = current_1h <= locked_1h
+                else:
+                    lock_still_valid = True
+                print(f"[REENTRY LOCK STATE] {symbol} locked_dir={locked_dir} current_signal={signal} lock_still_valid={lock_still_valid}")
+                if signal == locked_dir and lock_still_valid:
+                    print(f"[ENTRY BLOCKED — REENTRY LOCK] {symbol}")
+                    return {"state": "FLAT"}
 
-        if symbol in self._reentry_lock:
-            locked_dir = self._reentry_lock[symbol]
-            locked_at = self._reentry_lock_ts.get(symbol, "unknown")
-
-            # Compute whether lock is still valid (same 1H floor = still locked)
-            current_1h = current_ts.floor("h") if hasattr(current_ts, "floor") else pd.Timestamp(current_ts).floor("h")
-            if isinstance(locked_at, pd.Timestamp):
-                locked_1h = locked_at.floor("h")
-                lock_still_valid = current_1h <= locked_1h
-            else:
-                lock_still_valid = True  # unknown locked_at — be conservative, block
-
-            _tg_debug(
-                f"[REENTRY LOCK STATE] {symbol}\n"
-                f"locked_dir={locked_dir} current_signal={signal}\n"
-                f"locked_at={locked_at} locked_1h={locked_1h if isinstance(locked_at, pd.Timestamp) else '?'}\n"
-                f"current_1h={current_1h} lock_still_valid={lock_still_valid}\n"
-                f"would_block={signal == locked_dir and lock_still_valid}"
-            )
-            if signal == locked_dir and lock_still_valid:
-                _tg_debug(f"[ENTRY BLOCKED — REENTRY LOCK] {symbol} dir={signal} locked_at={locked_at}")
-                return {"state": "FLAT"}
-
-            signal_ts = current_5m_row.name
-
-            # latest_bar_ts = lltf_df.index[-1] -- LIVE ONLY
-            # if signal_ts != latest_bar_ts:
-            #     print(f"[ENTRY BLOCKED — NOT LATEST BAR] {symbol} signal_ts={signal_ts} latest={latest_bar_ts}")
-            #     return {"state": "FLAT"}
-
-            signal_id = (
-                symbol + "|" +
-                str(external_row.name) + "|" +
-                str(signal)
-            )
-
+            signal_id = symbol + "|" + str(external_row.name) + "|" + str(signal)
+            print(f"[ENTRY GATE 3] {symbol} signal_id={signal_id} in_executed={signal_id in self._executed_signals}")
             if signal_id in self._executed_signals:
-                _tg_debug(
-                    f"[EXECUTED SIGNAL BLOCK] {symbol}\n"
-                    f"signal_id={signal_id}\n"
-                    f"all_executed_for_symbol={[s for s in self._executed_signals if symbol in s]}"
-                )
+                print(f"[ENTRY BLOCKED — EXECUTED SIGNAL] {symbol} signal_id={signal_id}")
                 return {"state": "FLAT"}
 
             self._executed_signals.add(signal_id)
-            _tg_debug(
-                f"[EXECUTED SIGNAL REGISTERED] {symbol}\n"
-                f"signal_id={signal_id}\n"
-                f"total_executed={len(self._executed_signals)}"
-            )
 
-            # Use current 5m bar open as fill price.
-            # external_row["open"] is the signal bar open — a price that
-            # existed before the signal condition (close > resistance) was true.
-            # current_5m_row["open"] is the first price available after confirmation.
             entry_price = float(current_5m_row["open"])
+            print(f"[ENTRY GATE 4] {symbol} atr={atr} entry_price={entry_price}")
 
             if atr is None or atr <= 0 or np.isnan(atr):
-                _tg_debug(
-                    f"[WARN ATR INVALID] {symbol}\n"
-                    f"ts={current_ts} atr={atr}\n"
-                    f"ENTRY WILL BE BLOCKED"
-                )
-                atr = 0.000001
+                print(f"[ENTRY BLOCKED — ATR INVALID] {symbol} atr={atr}")
+                return {"state": "FLAT"}
 
             atr = float(atr)
 
-            _tg_debug(
-                f"[PRE-OPEN] {symbol}\n"
-                f"signal={signal} atr={atr}\n"
-                f"current_ts={current_ts}\n"
-                f"entry_price_raw={float(current_5m_row['open'])}\n"
-                f"positions_before_open={list(self.positions.keys())}"
-            )
-
             if atr <= 0:
-                _tg_debug(f"[ENTRY BLOCKED — ATR] {symbol} @ {current_ts} atr={atr}")
+                print(f"[ENTRY BLOCKED — ATR ZERO] {symbol} atr={atr}")
                 return {"state": "FLAT"}
 
             new_pos = self._open(symbol, signal, entry_price, current_ts, atr)
+            print(f"[ENTRY GATE 5] {symbol} new_pos={'ok' if new_pos else 'NONE'}")
 
             if new_pos:
-                # initialize bar history with entry candle
                 self._bar_history[symbol] = [{
-                    "open": o,
-                    "high": h,
-                    "low":  l,
-                    "close": c,
-                    "ATR": atr,
-                    "ts": current_ts,
+                    "open": o, "high": h, "low": l, "close": c,
+                    "ATR": atr, "ts": current_ts,
                 }]
-
                 return {"state": "OPEN", "position": new_pos}
+
+            print(f"[ENTRY BLOCKED — _open returned falsy] {symbol}")
 
         return {"state": "FLAT"}
 
