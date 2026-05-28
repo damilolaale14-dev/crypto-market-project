@@ -291,6 +291,7 @@ class PositionManager:
                         fill_price = float(current_5m_row["close"])
 
                     closed = self._close(symbol, fill_price, current_ts, exit_reason)
+                    print(f"[CLOSE] {symbol} reason={exit_reason} fill={fill_price} ts={current_ts}")
 
                     return {"state": "CLOSED", "exit": closed}
 

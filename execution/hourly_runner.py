@@ -61,11 +61,23 @@ def run_hourly():
         )
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
 
     symbol_summaries = []
     failed_symbols = []
 
-    # ── STEP 1: fetch all symbols in parallel (I/O bound, safe on free tier) ──
+    # ── Detect warmup vs live ──────────────────────────────────────
+    # Warmup = any symbol is missing its cursor file (first run ever)
+    # Live   = all cursors exist (normal hourly run)
+    is_warmup = any(
+        not os.path.exists(_last_5m_file(s, True)) for s in SYMBOLS
+    )
+    fetch_workers   = 8  if is_warmup else 20
+    process_workers = 8  if is_warmup else 20
+
+    print(f"[WORKERS] warmup={is_warmup} fetch={fetch_workers} process={process_workers}")
+
+    # ── STEP 1: fetch all symbols in parallel (I/O bound) ─────────
     fetched = {}
 
     def _fetch_symbol(symbol):
@@ -75,7 +87,7 @@ def run_hourly():
             import traceback
             return symbol, None, (e, traceback.format_exc())
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=fetch_workers) as executor:
         futures = {executor.submit(_fetch_symbol, s): s for s in SYMBOLS}
         for future in as_completed(futures):
             symbol, data, err = future.result()
@@ -92,8 +104,7 @@ def run_hourly():
             else:
                 fetched[symbol] = data
 
-    # ── STEP 2: signal generation + execution in parallel ──
-    import threading
+    # ── STEP 2: signal generation + execution in parallel ─────────
     _save_lock = threading.Lock()
 
     # Patch PositionManager._save to be thread-safe
@@ -122,7 +133,7 @@ def run_hourly():
             return symbol, None
 
     symbol_summaries = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=process_workers) as executor:
         futures = {executor.submit(_process_symbol, s): s for s in SYMBOLS}
         for future in as_completed(futures):
             symbol_summaries.append(future.result())
@@ -566,11 +577,10 @@ def run_hourly_for_symbol(
                     _current_signal_birth = ltf_row
                 signal_birth_row = _current_signal_birth
             else:
-                # Only reset birth anchor if we've had NO position for 2+ consecutive
-                # flat bars. A single flat bar between close and re-entry was resetting
-                # the anchor, producing a fresh signal_id that bypassed executed_signals.
-                if symbol not in pm.positions:
-                    _current_signal_birth = None
+                # Reset anchor only when signal goes flat — not based on position state.
+                # Resetting on position close was producing a fresh signal_id each re-entry
+                # which bypassed executed_signals and caused duplicate entries.
+                _current_signal_birth = None
                 signal_birth_row = ltf_row
 
             if bar_signal != 0:
