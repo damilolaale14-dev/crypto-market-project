@@ -242,6 +242,29 @@ class SignalBacktester:
             return False
         return mfe_r < self.NO_FOLLOW_MFE
     
+    def stall_exit(self, trade, bars_in_trade):
+        entry        = trade.get("entry_price", 0)
+        initial_stop = trade.get("initial_stop", trade.get("stop_loss", entry))
+        R = abs(entry - initial_stop)
+        if R <= 0:
+            return False
+
+        mfe_r = trade.get("mfe_r", 0.0)
+        mae_r = abs(trade.get("_price_mae", 0.0)) / R
+
+        # Mode 1: immediate rejection — 15 minutes in, no positive movement,
+        # price already more than 60% of the way to the stop
+        if bars_in_trade == 3:
+            if mfe_r == 0.0 and mae_r > 0.6:
+                return True
+
+        # Mode 2: prolonged stall — 90 minutes in, barely any progress
+        if bars_in_trade == self.VALIDATION_BARS:
+            if mfe_r < 0.2 and mae_r > 0.4:
+                return True
+
+        return False
+    
     # Mirrors lifecycle.py _update_dynamic_stop exactly
     ATR_AFTER_HALF_R = 2.0   # before 2R MFE
     ATR_AFTER_ONE_R  = 1.5   # after 2R MFE secured
@@ -526,42 +549,31 @@ class SignalBacktester:
         # Best price this bar (matches lifecycle.py convention)
         current_price = high if side == 1 else low
 
-        # ── MFE / MAE tracking (price terms, not dollar terms) ──
-        R = abs(trade["entry_price"] - trade["stop_loss"])
+        # ── MFE / MAE tracking ──
+        R = abs(trade["entry_price"] - trade.get("initial_stop", trade["stop_loss"]))
+        if R == 0:
+            R = abs(trade["entry_price"] - trade["stop_loss"])
         self.R = R
 
         if side == 1:
-            move_high = high - trade["entry_price"]
-            move_low  = low  - trade["entry_price"]
+            price_mfe = high - trade["entry_price"]
+            price_mae = low  - trade["entry_price"]
         else:
-            move_high = trade["entry_price"] - low
-            move_low  = trade["entry_price"] - high
+            price_mfe = trade["entry_price"] - low
+            price_mae = trade["entry_price"] - high
 
-        # MFE/MAE stored in price terms to match lifecycle.py
-        trade["MFE"] = max(trade.get("MFE", 0.0), move_high)
-        trade["MAE"] = min(trade.get("MAE", 0.0), move_low)
+        trade["_price_mfe"] = max(trade.get("_price_mfe", 0.0), price_mfe)
+        trade["_price_mae"] = min(trade.get("_price_mae", 0.0), price_mae)
 
-        # dollar excursions for diagnostics
+        # dollar excursions for diagnostics (used by _update_excursions output)
         if side == 1:
-            self.current_trade["MAE"] = min(
-                self.current_trade.get("MAE_usd", 0.0),
-                (low  - trade["entry_price"]) * self.units
-            )
-            self.current_trade["MFE"] = max(
-                self.current_trade.get("MFE_usd", 0.0),
-                (high - trade["entry_price"]) * self.units
-            )
+            trade["MAE"] = min(trade.get("MAE", 0.0), (low  - trade["entry_price"]) * self.units)
+            trade["MFE"] = max(trade.get("MFE", 0.0), (high - trade["entry_price"]) * self.units)
         else:
-            self.current_trade["MAE"] = min(
-                self.current_trade.get("MAE_usd", 0.0),
-                (trade["entry_price"] - high) * self.units
-            )
-            self.current_trade["MFE"] = max(
-                self.current_trade.get("MFE_usd", 0.0),
-                (trade["entry_price"] - low) * self.units
-            )
+            trade["MAE"] = min(trade.get("MAE", 0.0), (trade["entry_price"] - high) * self.units)
+            trade["MFE"] = max(trade.get("MFE", 0.0), (trade["entry_price"] - low)  * self.units)
 
-        mfe_r = trade["MFE"] / R if R > 0 else 0.0
+        mfe_r = trade["_price_mfe"] / R if R > 0 else 0.0
         pnl_r = (
             (current_price - trade["entry_price"]) / R if side == 1
             else (trade["entry_price"] - current_price) / R
@@ -582,6 +594,12 @@ class SignalBacktester:
             atr = R * 0.20  # last resort fallback
 
         self.update_dynamic_stop(trade, current_price, atr)
+
+        # ── STALL EXIT — catches slow bleed trades OIE never sees ──
+        bars_in_trade = trade.get("bars_in_trade", 0)
+        if self.stall_exit(trade, bars_in_trade):
+            self._exit(current_price, idx, "stall_exit")
+            return
 
         # ── OPPOSITE IMPULSE EXIT (matches lifecycle.py exactly) 
         if self.opposite_impulse_exit(window_5m, side, trade=trade):

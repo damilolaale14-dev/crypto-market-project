@@ -226,13 +226,21 @@ class PositionManager:
                 position["MFE"] = max(position["MFE"], move_high)
                 position["MAE"] = min(position["MAE"], move_low)
 
+            # price-based excursions anchored to initial_stop R — used by stall exit
+            if side == 1:
+                position["_price_mfe"] = max(position.get("_price_mfe", 0.0), h - entry_price)
+                position["_price_mae"] = min(position.get("_price_mae", 0.0), l - entry_price)
+            else:
+                position["_price_mfe"] = max(position.get("_price_mfe", 0.0), entry_price - l)
+                position["_price_mae"] = min(position.get("_price_mae", 0.0), entry_price - h)
+
             # -------------------------------------------------------
             # BUILD 5M WINDOW (REAL ATR HISTORY — BACKTEST PARITY)
             # -------------------------------------------------------
             window_5m = pd.DataFrame(self._bar_history[symbol])
 
             # convert to R
-            position["mfe_r"] = position["MFE"] / R
+            position["mfe_r"] = position["_price_mfe"] / R
 
             # ONLY for reporting (not exit logic anymore)
             if side == 1:
@@ -263,6 +271,9 @@ class PositionManager:
 
                 # if self._momentum_decay_exit(position):
                 #     try_exit("momentum_decay", current_price)
+
+                if self._stall_exit(position):
+                    try_exit("stall_exit", current_price)
 
                 if self._opposite_impulse_exit(window_5m, side, position):
                     try_exit("opposite_impulse", current_price)
@@ -345,19 +356,28 @@ class PositionManager:
                 )
                 return {"state": "FLAT"}
 
-            if symbol in self._reentry_lock:
-                locked_dir = self._reentry_lock[symbol]
-                locked_at = self._reentry_lock_ts.get(symbol, "unknown")
-                _tg_debug(
-                    f"[REENTRY LOCK STATE] {symbol}\n"
-                    f"locked_dir={locked_dir} current_signal={signal}\n"
-                    f"locked_at={locked_at}\n"
-                    f"would_block={signal == locked_dir}"
-                )
-                if signal == locked_dir:
-                    _tg_debug(f"[ENTRY BLOCKED — REENTRY LOCK] {symbol} dir={signal} locked_at={locked_at}")
-                    return {"state": "FLAT"}
-                    # NOTE: no return here intentionally until we confirm fix is needed
+        if symbol in self._reentry_lock:
+            locked_dir = self._reentry_lock[symbol]
+            locked_at = self._reentry_lock_ts.get(symbol, "unknown")
+
+            # Compute whether lock is still valid (same 1H floor = still locked)
+            current_1h = current_ts.floor("h") if hasattr(current_ts, "floor") else pd.Timestamp(current_ts).floor("h")
+            if isinstance(locked_at, pd.Timestamp):
+                locked_1h = locked_at.floor("h")
+                lock_still_valid = current_1h <= locked_1h
+            else:
+                lock_still_valid = True  # unknown locked_at — be conservative, block
+
+            _tg_debug(
+                f"[REENTRY LOCK STATE] {symbol}\n"
+                f"locked_dir={locked_dir} current_signal={signal}\n"
+                f"locked_at={locked_at} locked_1h={locked_1h if isinstance(locked_at, pd.Timestamp) else '?'}\n"
+                f"current_1h={current_1h} lock_still_valid={lock_still_valid}\n"
+                f"would_block={signal == locked_dir and lock_still_valid}"
+            )
+            if signal == locked_dir and lock_still_valid:
+                _tg_debug(f"[ENTRY BLOCKED — REENTRY LOCK] {symbol} dir={signal} locked_at={locked_at}")
+                return {"state": "FLAT"}
 
             signal_ts = current_5m_row.name
 
@@ -621,6 +641,32 @@ class PositionManager:
         if bars_5m < self.VALIDATION_BARS:
             return False
         return mfe_r < self.NO_FOLLOW_MFE
+    
+    def _stall_exit(self, position: dict) -> bool:
+        entry        = position.get("entry_price", 0)
+        initial_stop = position.get("initial_stop", position.get("stop_loss", entry))
+        R = abs(entry - initial_stop)
+        if R <= 0:
+            return False
+
+        mfe_r   = position.get("mfe_r", 0.0)
+        mae_r   = abs(position.get("_price_mae", 0.0)) / R
+        bars    = position.get("bars_in_trade", 0)
+
+        # Mode 1: immediate rejection — 15 minutes in, no positive movement,
+        # price already more than 60% of the way to the stop
+        if bars == 3:
+            if mfe_r == 0.0 and mae_r > 0.6:
+                _tg_debug(f"[STALL EXIT] {position.get('symbol','?')} mode=immediate_rejection bars={bars} mfe_r={mfe_r:.3f} mae_r={mae_r:.3f}")
+                return True
+
+        # Mode 2: prolonged stall — 90 minutes in, barely any progress
+        if bars == self.VALIDATION_BARS:
+            if mfe_r < 0.2 and mae_r > 0.4:
+                _tg_debug(f"[STALL EXIT] {position.get('symbol','?')} mode=prolonged_stall bars={bars} mfe_r={mfe_r:.3f} mae_r={mae_r:.3f}")
+                return True
+
+        return False
 
     def _update_dynamic_stop(self, position, current_price, atr, side):
         mfe_r = position["mfe_r"]

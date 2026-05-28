@@ -92,29 +92,43 @@ def run_hourly():
             else:
                 fetched[symbol] = data
 
-    # ── STEP 2: signal generation + execution sequentially (CPU/RAM bound) ──
-    for symbol in SYMBOLS:
+    # ── STEP 2: signal generation + execution in parallel ──
+    import threading
+    _save_lock = threading.Lock()
+
+    # Patch PositionManager._save to be thread-safe
+    _original_save = PositionManager._save
+    def _locked_save(self_pm):
+        with _save_lock:
+            _original_save(self_pm)
+    PositionManager._save = _locked_save
+
+    def _process_symbol(symbol):
         if fetched.get(symbol) is None:
-            symbol_summaries.append((symbol, None))
-            continue
+            return symbol, None
         try:
             result = run_hourly_for_symbol(symbol, prefetched=fetched[symbol])
-            if isinstance(result, tuple):
-                summary, _ = result
-            else:
-                summary = result
-            symbol_summaries.append((symbol, summary))
+            summary = result[0] if isinstance(result, tuple) else result
+            return symbol, summary
         except Exception as sym_err:
             import traceback
             tb = traceback.format_exc()
-            failed_symbols.append(symbol)
             notifier.send_text(
                 f"💥 *SYMBOL CRASH*\n"
                 f"Symbol: `{symbol}`\n"
                 f"Error: `{str(sym_err)[:300]}`\n"
                 f"Traceback:\n`{tb[:600]}`"
             )
-            symbol_summaries.append((symbol, None))
+            return symbol, None
+
+    symbol_summaries = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_process_symbol, s): s for s in SYMBOLS}
+        for future in as_completed(futures):
+            symbol_summaries.append(future.result())
+
+    # Restore original save
+    PositionManager._save = _original_save
 
     now = datetime.now(timezone.utc)
     local_now = now + pd.Timedelta(hours=1)  # WAT = UTC+1
@@ -552,7 +566,11 @@ def run_hourly_for_symbol(
                     _current_signal_birth = ltf_row
                 signal_birth_row = _current_signal_birth
             else:
-                _current_signal_birth = None
+                # Only reset birth anchor if we've had NO position for 2+ consecutive
+                # flat bars. A single flat bar between close and re-entry was resetting
+                # the anchor, producing a fresh signal_id that bypassed executed_signals.
+                if symbol not in pm.positions:
+                    _current_signal_birth = None
                 signal_birth_row = ltf_row
 
             if bar_signal != 0:
