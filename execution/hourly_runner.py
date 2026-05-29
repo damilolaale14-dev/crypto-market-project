@@ -580,6 +580,7 @@ def run_hourly_for_symbol(
 
         # notifier.debug(f"[REPLAY LOOP] {symbol} — processing {len(new_bars)} bars from {new_bars.index[0]} to {new_bars.index[-1]}")
         _current_signal_birth = None  # anchors signal expiry to first signal bar
+        _closed_this_tick = False     # prevents re-entry after close in same cron tick
         for _, row_5m in new_bars.iterrows():
 
             if pd.isna(row_5m["final_signal"]):
@@ -594,6 +595,10 @@ def run_hourly_for_symbol(
             # each new 1H bar, so expiry is measured correctly.
             # Resets to None when signal goes flat so the next signal
             # gets its own fresh birth anchor.
+            # Block re-entry after a close within the same cron tick
+            if _closed_this_tick:
+                bar_signal = 0
+
             if bar_signal != 0:
                 if _current_signal_birth is None:
                     _current_signal_birth = ltf_row
@@ -631,6 +636,8 @@ def run_hourly_for_symbol(
                 
             if isinstance(result, dict) and result.get("state") in ("OPEN", "CLOSED"):
                 bar_results.append(result)
+                if result.get("state") == "CLOSED":
+                    _closed_this_tick = True
                 if result.get("state") == "OPEN" and bar_signal != 0:
                     notifier.debug(
                         f"🚨 SIGNAL ENTERED | {symbol} | ts={_} | "
