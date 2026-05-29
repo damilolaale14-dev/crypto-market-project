@@ -278,6 +278,13 @@ def run_hourly_for_symbol(
     else:
         pm = PositionManager(persist=True, notify=notify)
 
+    # Hard gate — if a position is already open for this symbol,
+    # skip the entire signal generation and execution path.
+    # This is the only reliable cross-cron-tick re-entry block.
+    if symbol in pm.positions:
+        print(f"[POSITION GATE] {symbol} — already open, skipping")
+        return None
+
     # =========================
     # 5M STREAM MEMORY
     # =========================
