@@ -109,8 +109,9 @@ def update_symbol(symbol: str):
                 # check if 1H cache has the latest closed candle
                 ltf_check = pd.read_parquet(path_ltf)
                 ltf_check.index = pd.to_datetime(ltf_check.index, utc=True)
-                if ltf_check.index[-1] < now_hour - timedelta(hours=1):
-                    print(f"[SKIP BYPASSED] {symbol} — 1H cache behind ({ltf_check.index[-1]} < {now_hour - timedelta(hours=1)}), fetching")
+                last_closed_1h = now_hour - timedelta(hours=1)
+                if ltf_check.index[-1] != last_closed_1h:
+                    print(f"[SKIP BYPASSED] {symbol} — 1H cache not at last closed bar ({ltf_check.index[-1]} != {last_closed_1h}), fetching")
                     raise Exception("1H cache stale — force full fetch")
 
                 # also check 5m cache isn't stale by more than 2 bars
