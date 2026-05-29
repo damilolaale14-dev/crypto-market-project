@@ -101,7 +101,7 @@ def fetch_binance(symbol, interval, limit):
 #     "ORDIUSDT", "ADAUSDT", "EGLDUSDT"-, "TIAUSDT", "OPUSDT", "ICPUSDT", 
 #     "PAXGUSDT"-, "TRBUSDT"-
 # ] EGLD LINK PENDLE
-SYMBOL = "ZENUSDT"
+SYMBOL = "INJUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"

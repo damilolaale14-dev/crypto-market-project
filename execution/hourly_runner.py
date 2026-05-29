@@ -104,28 +104,17 @@ def run_hourly():
             else:
                 fetched[symbol] = data
 
-    # ── STEP 2: signal generation + execution in parallel ─────────
-    _save_lock = threading.Lock()
-
-    # Patch PositionManager._save and _save_reentry_lock to be thread-safe
-    _original_save = PositionManager._save
-    _original_save_reentry_lock = PositionManager._save_reentry_lock
-    def _locked_save(self_pm):
-        with _save_lock:
-            _original_save(self_pm)
-    def _locked_save_reentry_lock(self_pm):
-        with _save_lock:
-            _original_save_reentry_lock(self_pm)
-    PositionManager._save = _locked_save
-    PositionManager._save_reentry_lock = _locked_save_reentry_lock
-
-    def _process_symbol(symbol):
+    # ── STEP 2: signal generation + execution (serial — CPU-bound, GIL makes
+    #            threading actively slower here than serial execution) ──────────
+    symbol_summaries = []
+    for symbol in SYMBOLS:
         if fetched.get(symbol) is None:
-            return symbol, None
+            symbol_summaries.append((symbol, None))
+            continue
         try:
             result = run_hourly_for_symbol(symbol, prefetched=fetched[symbol])
             summary = result[0] if isinstance(result, tuple) else result
-            return symbol, summary
+            symbol_summaries.append((symbol, summary))
         except Exception as sym_err:
             import traceback
             tb = traceback.format_exc()
@@ -135,17 +124,7 @@ def run_hourly():
                 f"Error: `{str(sym_err)[:300]}`\n"
                 f"Traceback:\n`{tb[:600]}`"
             )
-            return symbol, None
-
-    symbol_summaries = []
-    with ThreadPoolExecutor(max_workers=process_workers) as executor:
-        futures = {executor.submit(_process_symbol, s): s for s in SYMBOLS}
-        for future in as_completed(futures):
-            symbol_summaries.append(future.result())
-
-    # Restore original methods
-    PositionManager._save = _original_save
-    PositionManager._save_reentry_lock = _original_save_reentry_lock
+            symbol_summaries.append((symbol, None))
 
     now = datetime.now(timezone.utc)
     local_now = now + pd.Timedelta(hours=1)  # WAT = UTC+1
@@ -375,9 +354,48 @@ def run_hourly_for_symbol(
             return None, replay_cursor
 
         # -------------------
-        # GENERATE & MAP SIGNALS
+        # GENERATE & MAP SIGNALS (incremental signal cache)
         # -------------------
-        df = generate_signal(df.copy(), htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+        from data_pipeline.updater import _signals_cache_path
+
+        signals_cache_path = _signals_cache_path(symbol)
+        df_new = df.copy()
+
+        if os.path.exists(signals_cache_path):
+            try:
+                cached_signals = pd.read_parquet(signals_cache_path)
+                cached_signals.index = pd.to_datetime(cached_signals.index, utc=True)
+
+                n_new = (df_new.index > cached_signals.index[-1]).sum()
+
+                if n_new == 0:
+                    df = cached_signals
+                    print(f"[SIGNAL CACHE HIT] {symbol} — no new bars, using cached signals")
+                elif n_new <= 3:
+                    CONTEXT_BARS = 100
+                    tail_start_idx = max(0, len(df_new) - CONTEXT_BARS)
+                    df_tail = df_new.iloc[tail_start_idx:].copy()
+                    df_tail = generate_signal(df_tail, htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+                    df_head = cached_signals[cached_signals.index < df_tail.index[0]]
+                    df = pd.concat([df_head, df_tail])
+                    print(f"[SIGNAL CACHE PARTIAL] {symbol} — {n_new} new bars, recomputed tail of {len(df_tail)}")
+                else:
+                    print(f"[SIGNAL CACHE MISS] {symbol} — {n_new} new bars, full recompute")
+                    df = generate_signal(df_new, htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+
+            except Exception as e:
+                print(f"[SIGNAL CACHE ERROR] {symbol} — {e}, full recompute")
+                df = generate_signal(df_new, htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+        else:
+            print(f"[SIGNAL CACHE COLD] {symbol} — first run, full recompute")
+            df = generate_signal(df_new, htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+
+        try:
+            tmp_path = signals_cache_path + ".tmp"
+            df.to_parquet(tmp_path)
+            os.replace(tmp_path, signals_cache_path)
+        except Exception as e:
+            print(f"[SIGNAL CACHE SAVE FAILED] {symbol} — {e}")
 
         _htf_quality   = float(df['HTF_QUALITY'].iloc[-1])
         _htf_direction = int(df['HTF_DIRECTION'].iloc[-1])
