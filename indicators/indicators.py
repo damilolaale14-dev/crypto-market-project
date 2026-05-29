@@ -1846,10 +1846,10 @@ def generate_signal(df, htf_df, atr_mult=1.5, live=False, as_of=None, symbol="?"
     # LONG_CONDITION  &= df['LOCATION_LONG_OK']
     # SHORT_CONDITION &= df['LOCATION_SHORT_OK']
 
-    df['signal'] = 0
-    df.loc[LONG_CONDITION, 'signal'] = 1
-    df.loc[SHORT_CONDITION, 'signal'] = -1
-    # df['signal'] = 1
+    # df['signal'] = 0
+    # df.loc[LONG_CONDITION, 'signal'] = 1
+    # df.loc[SHORT_CONDITION, 'signal'] = -1
+    df['signal'] = 1
 
     # ── FILTER AUDIT ──────────────────────────────────────────────
     # try:
