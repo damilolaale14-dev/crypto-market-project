@@ -107,12 +107,17 @@ def run_hourly():
     # ── STEP 2: signal generation + execution in parallel ─────────
     _save_lock = threading.Lock()
 
-    # Patch PositionManager._save to be thread-safe
+    # Patch PositionManager._save and _save_reentry_lock to be thread-safe
     _original_save = PositionManager._save
+    _original_save_reentry_lock = PositionManager._save_reentry_lock
     def _locked_save(self_pm):
         with _save_lock:
             _original_save(self_pm)
+    def _locked_save_reentry_lock(self_pm):
+        with _save_lock:
+            _original_save_reentry_lock(self_pm)
     PositionManager._save = _locked_save
+    PositionManager._save_reentry_lock = _locked_save_reentry_lock
 
     def _process_symbol(symbol):
         if fetched.get(symbol) is None:
@@ -138,8 +143,9 @@ def run_hourly():
         for future in as_completed(futures):
             symbol_summaries.append(future.result())
 
-    # Restore original save
+    # Restore original methods
     PositionManager._save = _original_save
+    PositionManager._save_reentry_lock = _original_save_reentry_lock
 
     now = datetime.now(timezone.utc)
     local_now = now + pd.Timedelta(hours=1)  # WAT = UTC+1

@@ -981,7 +981,18 @@ class PositionManager:
             json.dump(lock_payload, f, indent=2)
         os.replace(REENTRY_LOCK_FILE + ".tmp", REENTRY_LOCK_FILE)
 
-        # EXECUTED SIGNALS
+        # EXECUTED SIGNALS — additive merge to prevent parallel threads
+        # from overwriting each other's entries.
+        # Read current file, merge with in-memory set, write back.
+        existing = set()
+        if os.path.exists(EXECUTED_SIGNALS_FILE):
+            try:
+                with open(EXECUTED_SIGNALS_FILE, "r") as f:
+                    content = f.read().strip()
+                existing = set(json.loads(content)) if content else set()
+            except (json.JSONDecodeError, ValueError):
+                existing = set()
+        merged = existing | self._executed_signals
         with open(EXECUTED_SIGNALS_FILE + ".tmp", "w") as f:
-            json.dump(list(self._executed_signals), f, indent=2)
+            json.dump(list(merged), f, indent=2)
         os.replace(EXECUTED_SIGNALS_FILE + ".tmp", EXECUTED_SIGNALS_FILE)
