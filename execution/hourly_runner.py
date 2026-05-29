@@ -279,8 +279,8 @@ def run_hourly_for_symbol(
         pm = PositionManager(persist=True, notify=notify)
 
     # Hard gate — skip if position is open OR reentry lock is active.
-    # Reentry lock persists for 1 hour after close — checking it here
-    # means we don't even run signal generation for locked symbols.
+    print(f"[GATE CHECK] {symbol} positions={list(pm.positions.keys())} reentry_lock={dict(pm._reentry_lock)}")
+
     if symbol in pm.positions:
         print(f"[POSITION GATE] {symbol} — already open, skipping")
         return None
@@ -290,9 +290,14 @@ def run_hourly_for_symbol(
         if locked_at is not None:
             unlock_at = locked_at + pd.Timedelta(hours=1)
             now_utc = pd.Timestamp(datetime.now(timezone.utc))
+            print(f"[REENTRY GATE CHECK] {symbol} locked_at={locked_at} unlock_at={unlock_at} now={now_utc} still_locked={now_utc < unlock_at}")
             if now_utc < unlock_at:
                 print(f"[REENTRY GATE] {symbol} — lock active until {unlock_at}, skipping")
                 return None
+        else:
+            print(f"[REENTRY GATE MISS] {symbol} — in reentry_lock but locked_at is None")
+    else:
+        print(f"[REENTRY GATE MISS] {symbol} — not in reentry_lock at all")
 
     # =========================
     # 5M STREAM MEMORY
