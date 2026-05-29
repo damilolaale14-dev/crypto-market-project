@@ -309,17 +309,16 @@ class PositionManager:
             locked_dir = self._reentry_lock[symbol]
             locked_at = self._reentry_lock_ts.get(symbol)
 
-            # unlock only when a new 1H candle has formed since the stop
-            current_1h = current_ts.floor("h") if hasattr(current_ts, "floor") else pd.Timestamp(current_ts).floor("h")
-            locked_1h = locked_at.floor("h") if locked_at is not None else None
+            # Unlock only after a full hour has elapsed since the close,
+            # not just at the next 1H boundary.
+            # e.g. close at 02:25 → unlock at 03:25, not at 03:00.
+            unlock_at = locked_at + pd.Timedelta(hours=1) if locked_at is not None else None
+            ready_to_unlock = unlock_at is not None and current_ts >= unlock_at
 
-            new_candle_formed = locked_1h is not None and current_1h > locked_1h
-
-            if new_candle_formed:
+            if ready_to_unlock:
                 self._reentry_lock.pop(symbol, None)
                 self._just_unlocked.add(symbol)  # block entry this bar only
                 self._dirty = True
-
 
         # ===================================================
         # SIGNAL EXPIRY CHECK
@@ -356,10 +355,9 @@ class PositionManager:
             if symbol in self._reentry_lock:
                 locked_dir = self._reentry_lock[symbol]
                 locked_at = self._reentry_lock_ts.get(symbol, "unknown")
-                current_1h = current_ts.floor("h") if hasattr(current_ts, "floor") else pd.Timestamp(current_ts).floor("h")
                 if isinstance(locked_at, pd.Timestamp):
-                    locked_1h = locked_at.floor("h")
-                    lock_still_valid = current_1h <= locked_1h
+                    unlock_at = locked_at + pd.Timedelta(hours=1)
+                    lock_still_valid = current_ts < unlock_at
                 else:
                     lock_still_valid = True
                 print(f"[REENTRY LOCK STATE] {symbol} locked_dir={locked_dir} current_signal={signal} lock_still_valid={lock_still_valid}")
