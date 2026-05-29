@@ -994,16 +994,24 @@ class PositionManager:
             )
         os.replace(ENTRY_TS_FILE + ".tmp", ENTRY_TS_FILE)
 
-        # REENTRY LOCK
-        lock_payload = {
-            k: {
+        # REENTRY LOCK — additive merge, same pattern as positions and executed signals.
+        # Parallel threads must not overwrite each other's locks.
+        existing_locks = {}
+        if os.path.exists(REENTRY_LOCK_FILE):
+            try:
+                with open(REENTRY_LOCK_FILE, "r") as f:
+                    content = f.read().strip()
+                existing_locks = json.loads(content) if content else {}
+            except (json.JSONDecodeError, ValueError):
+                existing_locks = {}
+        merged_locks = {**existing_locks}
+        for k, v in self._reentry_lock.items():
+            merged_locks[k] = {
                 "direction": v,
                 "locked_at": self._reentry_lock_ts.get(k, pd.Timestamp.now(tz="UTC")).isoformat()
             }
-            for k, v in self._reentry_lock.items()
-        }
         with open(REENTRY_LOCK_FILE + ".tmp", "w") as f:
-            json.dump(lock_payload, f, indent=2)
+            json.dump(merged_locks, f, indent=2)
         os.replace(REENTRY_LOCK_FILE + ".tmp", REENTRY_LOCK_FILE)
 
         # EXECUTED SIGNALS — additive merge to prevent parallel threads
