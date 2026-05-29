@@ -739,10 +739,12 @@ class PositionManager:
         duration_bars = pos.get("bars_in_trade", 0)
         
         self._reentry_lock[symbol] = pos["direction"]
-        # Use the bar's timestamp, not wall clock — critical for replay correctness
-        self._reentry_lock_ts[symbol] = pd.Timestamp(ts) if not isinstance(ts, pd.Timestamp) else ts
-        if self._reentry_lock_ts[symbol].tzinfo is None:
-            self._reentry_lock_ts[symbol] = self._reentry_lock_ts[symbol].tz_localize("UTC")
+        # Floor to hour boundary — lock expires at the next hour, not close_time + 1h.
+        # e.g. close at 07:25 → locked_at=07:00 → unlock_at=08:00
+        _close_ts = pd.Timestamp(ts) if not isinstance(ts, pd.Timestamp) else ts
+        if _close_ts.tzinfo is None:
+            _close_ts = _close_ts.tz_localize("UTC")
+        self._reentry_lock_ts[symbol] = _close_ts.floor("h")
         # Write lock immediately — prevents race condition where next cron tick
         # instantiates a fresh PositionManager before flush() runs and misses the lock
         self._save_reentry_lock()
