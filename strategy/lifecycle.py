@@ -85,7 +85,6 @@ class PositionManager:
         self._just_unlocked: set[str] = set()
         self._dirty = False
         self._managed_symbols: set[str] = set()
-        self._closed_ts: dict = {}
 
     # --------------------------------------------------
     # MAIN UPDATE  (called once per new 5M candle close)
@@ -294,7 +293,7 @@ class PositionManager:
 
                     closed = self._close(symbol, fill_price, current_ts, exit_reason)
                     print(f"[CLOSE] {symbol} reason={exit_reason} fill={fill_price} ts={current_ts}")
-                    self._closed_ts[symbol] = current_ts
+
                     return {"state": "CLOSED", "exit": closed}
 
             # increment real trade age AFTER exit checks (backtest parity)
@@ -347,10 +346,6 @@ class PositionManager:
         print(f"[ENTRY GATE] {symbol} not_position={not position} signal={signal}")
 
         if not position and signal != 0:
-
-            if self._closed_ts.get(symbol) == current_ts:
-                print(f"[ENTRY BLOCKED — SAME BAR CLOSE] {symbol}")
-                return {"state": "FLAT"}
 
             print(f"[ENTRY GATE 1] {symbol} just_unlocked={symbol in self._just_unlocked}")
             if symbol in self._just_unlocked:
