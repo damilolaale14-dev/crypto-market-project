@@ -397,7 +397,10 @@ def update_symbol(symbol: str):
                 last_lltf_ts = df_lltf.index[-1]
 
     lltf_fetch_start = start_required if df_lltf is None else last_lltf_ts + timedelta(minutes=5)
-    lltf_fetch_end   = now_full  # 5m candles: use full-precision now so every cron fire fetches new bars
+    # Only fetch closed 5m bars — strip the open bar at source so the
+    # candle guard downstream never sees it and the cursor advances correctly.
+    lltf_fetch_end = pd.Timestamp(now_full).floor("5min") - pd.Timedelta(minutes=5)
+    lltf_fetch_end = lltf_fetch_end.to_pydatetime().replace(tzinfo=timezone.utc)
 
     print("[FETCH LLTF WINDOW]")
     print("start:", lltf_fetch_start)
