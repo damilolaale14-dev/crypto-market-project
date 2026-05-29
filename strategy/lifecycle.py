@@ -101,6 +101,8 @@ class PositionManager:
 
         signal = 0 if pd.isna(external_signal) else int(external_signal)
         position = self.positions.get(symbol)
+        if position:
+            self._managed_symbols.add(symbol)
 
         o = float(current_5m_row["open"])
         h = float(current_5m_row["high"])
@@ -132,6 +134,7 @@ class PositionManager:
                 "ATR": atr,
                 "ATR_5M": atr_5m,
                 "ts": str(current_ts),
+                "volume": float(current_5m_row["volume"]) if "volume" in current_5m_row.index and not pd.isna(current_5m_row["volume"]) else float("nan"),
             }
 
             # Guard: if bar_history for this symbol is missing or empty after
@@ -396,6 +399,7 @@ class PositionManager:
                 self._bar_history[symbol] = [{
                     "open": o, "high": h, "low": l, "close": c,
                     "ATR": atr, "ts": current_ts,
+                    "volume": float(current_5m_row["volume"]) if "volume" in current_5m_row.index and not pd.isna(current_5m_row["volume"]) else float("nan"),
                 }]
                 return {"state": "OPEN", "position": new_pos}
 

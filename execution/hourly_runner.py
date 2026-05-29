@@ -356,9 +356,7 @@ def run_hourly_for_symbol(
         # -------------------
         # GENERATE & MAP SIGNALS (incremental signal cache)
         # -------------------
-        from data_pipeline.updater import _signals_cache_path
-
-        signals_cache_path = _signals_cache_path(symbol)
+        signals_cache_path = os.path.join("data/cache", f"{symbol}_signals.parquet")
         df_new = df.copy()
 
         if os.path.exists(signals_cache_path):
