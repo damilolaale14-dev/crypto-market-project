@@ -329,18 +329,7 @@ def run_hourly_for_symbol(
 
         # generate_signal hasn't run yet here — check after it runs below
         # (split the guard: include decision is made after signal gen)
-        _early_entry_eligible = (
-            is_live
-            and seconds_elapsed >= 30
-            and boundary_in_data
-            and current_5m_boundary.minute == 0
-        )
-
-        if _early_entry_eligible:
-            lltf_df = lltf_df[lltf_df.index <= current_5m_boundary].copy()
-            print(f"[EARLY ENTRY GUARD] {symbol} — boundary bar {current_5m_boundary} included ({seconds_elapsed:.0f}s elapsed)")
-        else:
-            lltf_df = lltf_df[lltf_df.index < current_5m_boundary].copy()
+        lltf_df = lltf_df[lltf_df.index < current_5m_boundary].copy()
 
         # notifier.debug(
         #     f"[CANDLE GUARD] {symbol}\n"
