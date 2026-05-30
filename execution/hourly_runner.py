@@ -21,7 +21,7 @@ def _tg_debug(msg: str) -> None:
 SYMBOLS = [
     "AXSUSDT", "XRPUSDT", "AVAXUSDT", "DOTUSDT", "AAVEUSDT", "XLMUSDT", 
     "SUIUSDT", "VETUSDT", "TRXUSDT", "LDOUSDT", "INJUSDT", "RUNEUSDT", 
-    "ORDIUSDT", "ADAUSDT", "ZENUSDT", "TIAUSDT", "OPUSDT", "ICPUSDT", 
+    "ORDIUSDT", "ADAUSDT", "EGLDUSDT", "TIAUSDT", "OPUSDT", "ICPUSDT", 
     "PAXGUSDT", "TRBUSDT"
 ]
 
@@ -130,6 +130,39 @@ def run_hourly():
             os.replace(last_summary_file + ".tmp", last_summary_file)
 
     print("\n=== EXECUTION COMPLETE ===\n")
+
+SIGNAL_CACHE_DIR = "data/signal_cache"
+
+def _get_signal_df(symbol, df, htf_df, is_live, htf_scores, latest_hour_ts):
+    os.makedirs(SIGNAL_CACHE_DIR, exist_ok=True)
+    cache_path = os.path.join(SIGNAL_CACHE_DIR, f"{symbol}_signals.parquet")
+    meta_path  = os.path.join(SIGNAL_CACHE_DIR, f"{symbol}_meta.json")
+
+    if os.path.exists(cache_path) and os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            if meta.get("hour") == latest_hour_ts:
+                cached = pd.read_parquet(cache_path)
+                cached.index = pd.to_datetime(cached.index, utc=True)
+                print(f"[SIGNAL CACHE HIT] {symbol} — skipping generate_signal")
+                return cached
+        except Exception:
+            pass
+
+    print(f"[SIGNAL CACHE MISS] {symbol} — running generate_signal")
+    df = generate_signal(df.copy(), htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+
+    try:
+        df.to_parquet(cache_path + ".tmp")
+        os.replace(cache_path + ".tmp", cache_path)
+        with open(meta_path + ".tmp", "w") as f:
+            json.dump({"hour": latest_hour_ts}, f)
+        os.replace(meta_path + ".tmp", meta_path)
+    except Exception as e:
+        print(f"[SIGNAL CACHE SAVE FAILED] {symbol} — {e}")
+
+    return df
 
 # ==========================================================
 # SINGLE SYMBOL ENGINE (UNIFIED LIVE + REPLAY)
@@ -307,7 +340,8 @@ def run_hourly_for_symbol(
         # -------------------
         # GENERATE & MAP SIGNALS
         # -------------------
-        df = generate_signal(df.copy(), htf_df.copy(), live=is_live, symbol=symbol, htf_stack_cache=htf_scores)
+        latest_hour_ts = df.index[-1].isoformat()
+        df = _get_signal_df(symbol, df, htf_df, is_live, htf_scores, latest_hour_ts)
 
         _htf_quality   = float(df['HTF_QUALITY'].iloc[-1])
         _htf_direction = int(df['HTF_DIRECTION'].iloc[-1])
