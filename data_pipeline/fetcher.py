@@ -33,7 +33,7 @@ def fetch_ohlcv(
     end: datetime = None,
     interval: str = "1h",
     limit: int = 1000,
-    retries: int = 3,
+    retries: int = 5,
     verbose: bool = True,
 ) -> pd.DataFrame:
 
@@ -62,6 +62,11 @@ def fetch_ohlcv(
     end_ms = _to_ms(end) if end else None
 
     for attempt in range(retries):
+
+        if attempt > 0:
+            wait = 2 ** attempt  # 2s, 4s
+            print(f"[FETCH RETRY] {symbol} attempt {attempt+1}/{retries} — waiting {wait}s")
+            time.sleep(wait)
 
         try:
             if verbose:
@@ -128,6 +133,8 @@ def fetch_ohlcv(
 
         except Exception as e:
             print(f"[FETCH ERROR] attempt {attempt+1}: {e}")
-            time.sleep(1)
+            # if rate limited, back off harder
+            if "429" in str(e) or "418" in str(e):
+                time.sleep(10 * (attempt + 1))
 
     raise RuntimeError(f"Failed to fetch data for {symbol}")
