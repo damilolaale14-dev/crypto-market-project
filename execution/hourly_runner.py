@@ -1,11 +1,11 @@
 # execution/hourly_runner.py
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from utils.log import debug, info, trade, error
 from utils.logger import log
 
-from data_pipeline.updater import update_symbol
+from data_pipeline.updater import update_symbol, _cache_path
 from indicators.indicators import generate_signal, atr_ema
 from strategy.lifecycle import PositionManager
 from execution.notifier import TelegramNotifier
@@ -271,8 +271,41 @@ def run_hourly_for_symbol(
         # FETCH DATA
         # -------------------
         try:
+            now_check = datetime.now(timezone.utc)
+            is_5m_boundary = now_check.minute % 5 == 0
+
             if forced_time is None and not replay:
-                df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
+                if is_5m_boundary or not os.path.exists(_cache_path(symbol, "5m")):
+                    df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
+                else:
+                    # between 5m boundaries — serve from cache, no fetching
+                    try:
+                        now_utc_c = datetime.now(timezone.utc)
+                        now_hour_c = now_utc_c.replace(minute=0, second=0, microsecond=0)
+                        hours_into_cycle_c = now_hour_c.hour % 4
+                        current_4h_open_c = now_hour_c - timedelta(hours=hours_into_cycle_c)
+
+                        df = pd.read_parquet(_cache_path(symbol, "1h"))
+                        df.index = pd.to_datetime(df.index, utc=True)
+                        df = df[df.index <= now_hour_c - timedelta(hours=1)]
+
+                        htf_df = pd.read_parquet(_cache_path(symbol, "4h"))
+                        htf_df.index = pd.to_datetime(htf_df.index, utc=True)
+                        htf_df = htf_df[htf_df.index < current_4h_open_c]
+
+                        lltf_df = pd.read_parquet(_cache_path(symbol, "5m"))
+                        lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
+
+                        htf_scores = None
+                        _path_htf_scores = _cache_path(symbol, "htf_scores")
+                        if os.path.exists(_path_htf_scores):
+                            htf_scores = pd.read_parquet(_path_htf_scores)
+                            htf_scores.index = pd.to_datetime(htf_scores.index, utc=True)
+
+                        print(f"[CACHE SERVE] {symbol} — not a 5m boundary, serving from cache")
+                    except Exception as cache_err:
+                        print(f"[CACHE SERVE FAILED] {symbol} — {cache_err}, falling back to update_symbol")
+                        df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
             else:
                 df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
 
