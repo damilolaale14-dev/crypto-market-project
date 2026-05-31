@@ -133,8 +133,19 @@ def fetch_ohlcv(
 
         except Exception as e:
             print(f"[FETCH ERROR] attempt {attempt+1}: {e}")
-            # if rate limited, back off harder
             if "429" in str(e) or "418" in str(e):
-                time.sleep(10 * (attempt + 1))
+                # try to read Retry-After from the response header
+                retry_after = None
+                if hasattr(e, 'response') and e.response is not None:
+                    retry_after = e.response.headers.get("Retry-After")
+                if retry_after:
+                    wait = int(retry_after)
+                    print(f"[RATE LIMIT] Binance says wait {wait}s")
+                else:
+                    wait = 120 if "418" in str(e) else 60
+                    print(f"[RATE LIMIT] no Retry-After header, backing off {wait}s")
+                time.sleep(wait)
+            else:
+                time.sleep(2 ** attempt)
 
     raise RuntimeError(f"Failed to fetch data for {symbol}")
