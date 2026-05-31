@@ -212,6 +212,17 @@ def test_pipeline():
     thread.start()
 
     return {"status": "pipeline_test_started"}, 200
+
+@app.route("/test-proxy")
+def test_proxy():
+    import requests, os
+    proxy_url = os.getenv("PROXY_URL")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    try:
+        r = requests.get("https://ipv4.webshare.io/", proxies=proxies, timeout=10)
+        return {"proxy_url_set": bool(proxy_url), "your_ip": r.text.strip()}, 200
+    except Exception as e:
+        return {"error": str(e), "proxy_url_set": bool(proxy_url)}, 500
     
 @app.route("/replay")
 def replay():
