@@ -2,16 +2,8 @@ import requests
 import pandas as pd
 from datetime import datetime, timezone
 import time
-import os
 
 BASE_URL = "https://api.binance.com/api/v3/klines"
-
-
-def _get_proxy():
-    proxy_url = os.getenv("PROXY_URL")
-    if proxy_url:
-        return {"http": proxy_url, "https": proxy_url}
-    return None
 
 
 def _to_ms(dt):
@@ -49,7 +41,7 @@ def fetch_ohlcv(
 
     def safe_request(params):
         try:
-            r = requests.get(BASE_URL, params=params, timeout=10, proxies=_get_proxy())
+            r = requests.get(BASE_URL, params=params, timeout=10)
             r.raise_for_status()
             data = r.json()
 

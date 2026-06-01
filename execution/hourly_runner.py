@@ -278,7 +278,8 @@ def run_hourly_for_symbol(
                 if is_5m_boundary or not os.path.exists(_cache_path(symbol, "5m")):
                     df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
                 else:
-                    # between 5m boundaries — serve from cache, no fetching
+                    # between 5m boundaries — 1H/4H from cache, but still fetch fresh 5m bars
+                    # so the cursor can advance every cron tick
                     try:
                         now_utc_c = datetime.now(timezone.utc)
                         now_hour_c = now_utc_c.replace(minute=0, second=0, microsecond=0)
@@ -293,16 +294,32 @@ def run_hourly_for_symbol(
                         htf_df.index = pd.to_datetime(htf_df.index, utc=True)
                         htf_df = htf_df[htf_df.index < current_4h_open_c]
 
-                        lltf_df = pd.read_parquet(_cache_path(symbol, "5m"))
-                        lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
-
                         htf_scores = None
                         _path_htf_scores = _cache_path(symbol, "htf_scores")
                         if os.path.exists(_path_htf_scores):
                             htf_scores = pd.read_parquet(_path_htf_scores)
                             htf_scores.index = pd.to_datetime(htf_scores.index, utc=True)
 
-                        print(f"[CACHE SERVE] {symbol} — not a 5m boundary, serving from cache")
+                        # Always fetch fresh 5m bars — this is cheap (only new bars since
+                        # last cursor) and is what allows the cursor to advance every tick.
+                        # Without this, lltf_df is stale, new_bars is empty, cursor is stuck.
+                        from data_pipeline.updater import _fetch_all
+                        lltf_df = pd.read_parquet(_cache_path(symbol, "5m"))
+                        lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
+                        lltf_fetch_start = lltf_df.index[-1] + pd.Timedelta(minutes=5)
+                        lltf_fetch_end = pd.Timestamp(now_utc_c).tz_localize("UTC") if now_utc_c.tzinfo is None else pd.Timestamp(now_utc_c)
+                        if lltf_fetch_start <= lltf_fetch_end:
+                            new_lltf = _fetch_all(symbol, "5m", lltf_fetch_start, lltf_fetch_end)
+                            if not new_lltf.empty:
+                                lltf_df = pd.concat([lltf_df, new_lltf])
+                                lltf_df = lltf_df[~lltf_df.index.duplicated(keep="last")]
+                                lltf_df = lltf_df.sort_index()
+                                # save back so next cache read is also fresh
+                                tmp = _cache_path(symbol, "5m") + ".tmp"
+                                lltf_df.to_parquet(tmp)
+                                os.replace(tmp, _cache_path(symbol, "5m"))
+
+                        print(f"[CACHE SERVE] {symbol} — 1H/4H from cache, 5m fetched fresh (last={lltf_df.index[-1]})")
                     except Exception as cache_err:
                         print(f"[CACHE SERVE FAILED] {symbol} — {cache_err}, falling back to update_symbol")
                         df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
