@@ -18,6 +18,30 @@ def health():
     return {"status": "alive"}, 200
 
 
+@app.route("/test-proxy")
+def test_proxy():
+    import requests
+    proxy_url = os.getenv("PROXY_URL")
+    if not proxy_url:
+        return {"status": "error", "message": "PROXY_URL env var not set"}, 400
+    
+    try:
+        proxies = {"http": proxy_url, "https": proxy_url}
+        r = requests.get(
+            "https://api.binance.com/api/v3/ping",
+            proxies=proxies,
+            timeout=10
+        )
+        return {
+            "status": "ok",
+            "proxy_used": proxy_url[:40] + "...",
+            "binance_response": r.status_code,
+            "body": r.json()
+        }, 200
+    except Exception as e:
+        return {"status": "error", "message": str(e)}, 500
+
+
 @app.route("/")
 def run():
     if not _run_lock.acquire(blocking=False):

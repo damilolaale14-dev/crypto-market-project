@@ -97,12 +97,12 @@ def fetch_binance(symbol, interval, limit):
 # CONFIG 
 # ==========================================================
 # SYMBOLS = [
-#     "AXSUSDT"/, "XRPUSDT", "AVAXUSDT"/, "DOTUSDT", "AAVEUSDT"-, "XLMUSDT"-, 
+#     "AXSUSDT"-, "XRPUSDT", "AVAXUSDT"/, "DOTUSDT", "AAVEUSDT"-, "XLMUSDT"-, 
 #     "SUIUSDT", "VETUSDT"-, "TRXUSDT", "LDOUSDT", "INJUSDT", "RUNEUSDT", 
 #     "ORDIUSDT", "ADAUSDT", "EGLDUSDT"-, "TIAUSDT", "OPUSDT", "ICPUSDT", 
-#     "PAXGUSDT"-, "TRBUSDT"-
+#     "PAXGUSDT"-, "TRBUSDT"
 # ] EGLD LINK PENDLE
-SYMBOL = "ADAUSDT"
+SYMBOL = "AVAXUSDT"
 
 LLTF_INTERVAL = "5m"
 LTF_INTERVAL = "1h"
@@ -117,16 +117,16 @@ LEVERAGE = 1
 # LTF_LIMIT = 43800   # ~30 days of 1h candles
 # HTF_LIMIT = 10950   # ~120 days of 4h candles
 
-LLTF_LIMIT = 420480
-LTF_LIMIT = 35040   # ~30 days of 1h candles
-HTF_LIMIT = 8760   # ~120 days of 4h candles
+# LLTF_LIMIT = 420480
+# LTF_LIMIT = 35040   # ~30 days of 1h candles
+# HTF_LIMIT = 8760   # ~120 days of 4h candles
 
 # LTF_LIMIT = 26280   # ~30 days of 1h candles
 # HTF_LIMIT = 6570   # ~120 days of 4h candles
 
-# LLTF_LIMIT = 210240
-# LTF_LIMIT = 17520   # ~30 days of 1h candles
-# HTF_LIMIT = 4380   # ~120 days of 4h candles
+LLTF_LIMIT = 210240
+LTF_LIMIT = 17520   # ~30 days of 1h candles
+HTF_LIMIT = 4380   # ~120 days of 4h candles
 
 # LTF_LIMIT = 8760   # ~30 days of 1h candles
 # HTF_LIMIT = 2190   # ~120 days of 4h candles
