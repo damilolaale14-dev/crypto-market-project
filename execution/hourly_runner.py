@@ -45,6 +45,13 @@ def run_hourly():
 
     notifier = TelegramNotifier()
 
+    from data_pipeline.rate_limiter import rate_limiter
+    if rate_limiter.is_banned():
+        wait_secs = int(rate_limiter.banned_until - time.time())
+        print(f"[RUN SKIPPED] IP ban still active ({wait_secs}s remaining + 60s buffer) — aborting")
+        notifier.send_text(f"🚫 *RUN SKIPPED*\nBan still active — `{wait_secs}s` remaining")
+        return
+
     if os.path.exists("data/replay_lock.json"):
         notifier.send_text("🔒 *LIVE SKIPPED*\nReplay lock active — skipping live execution")
         return

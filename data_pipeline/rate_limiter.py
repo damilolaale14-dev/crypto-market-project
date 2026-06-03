@@ -30,6 +30,10 @@ class BinanceRateLimiter:
             }, f)
         os.replace(STATE_FILE + ".tmp", STATE_FILE)
 
+    def is_banned(self, buffer_secs=60) -> bool:
+        self._load()
+        return time.time() < self.banned_until + buffer_secs
+
     def check(self):
         now = time.time()
         if now < self.banned_until:
