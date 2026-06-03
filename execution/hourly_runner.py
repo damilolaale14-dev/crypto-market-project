@@ -370,6 +370,8 @@ def run_hourly_for_symbol(
                     pass
 
         except Exception as fetch_err:
+            if "IP_BANNED" in str(fetch_err):
+                raise  # let run_hourly handle it silently
             notifier.send_text(
                 f"💥 *UPDATE_SYMBOL FAILED*\n"
                 f"`{symbol}` forced_time=`{forced_time}`\n"
