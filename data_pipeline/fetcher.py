@@ -42,21 +42,39 @@ def fetch_ohlcv(
     def safe_request(params):
         try:
             r = requests.get(BASE_URL, params=params, timeout=10)
-            r.raise_for_status()
+
+            # LOG RATE LIMIT HEADERS ON EVERY RESPONSE
+            used_weight = r.headers.get("X-MBX-USED-WEIGHT-1M", "?")
+            retry_after = r.headers.get("Retry-After", None)
+            print(f"[BINANCE HEADERS] status={r.status_code} weight_used={used_weight} retry_after={retry_after}")
+
+            if r.status_code == 429:
+                raise RuntimeError(f"RATE_LIMIT_429: weight={used_weight} retry_after={retry_after} url={r.url}")
+            if r.status_code == 418:
+                raise RuntimeError(f"IP_BANNED_418: weight={used_weight} retry_after={retry_after} url={r.url}")
+            if r.status_code != 200:
+                raise RuntimeError(f"HTTP_{r.status_code}: body={r.text[:300]} url={r.url}")
+
             data = r.json()
 
             # 🔥 HARD GUARD: Binance sometimes returns dict error payload
             if isinstance(data, dict):
-                raise RuntimeError(f"Binance error response: {data}")
+                raise RuntimeError(f"BINANCE_ERROR_DICT: {data} url={r.url}")
 
             # 🔥 HARD GUARD: empty or malformed
             if not isinstance(data, list):
-                raise RuntimeError(f"Unexpected response type: {type(data)}")
+                raise RuntimeError(f"UNEXPECTED_TYPE: {type(data)} body={str(data)[:200]} url={r.url}")
 
             return data
 
+        except RuntimeError:
+            raise  # let our descriptive errors through unchanged
+        except requests.exceptions.ConnectionError as e:
+            raise RuntimeError(f"CONNECTION_ERROR: {e}")
+        except requests.exceptions.Timeout as e:
+            raise RuntimeError(f"TIMEOUT: params={params} error={e}")
         except Exception as e:
-            raise RuntimeError(f"Request failed: {e}")
+            raise RuntimeError(f"UNKNOWN: {type(e).__name__}: {e}")
 
     start_ms = _to_ms(start) if start else None
     end_ms = _to_ms(end) if end else None
@@ -148,4 +166,4 @@ def fetch_ohlcv(
             else:
                 time.sleep(2 ** attempt)
 
-    raise RuntimeError(f"Failed to fetch data for {symbol}")
+    raise RuntimeError(f"Failed to fetch data for {symbol} — all {retries} attempts exhausted")
