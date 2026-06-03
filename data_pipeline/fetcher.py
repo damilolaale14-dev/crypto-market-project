@@ -41,9 +41,7 @@ def fetch_ohlcv(
 
     def safe_request(params):
         try:
-            PROXY = "http://xwzcgrvw:coc8wom3hv64@31.58.9.4:6077"
-            proxies = {"http": PROXY, "https": PROXY}
-            r = requests.get(BASE_URL, params=params, timeout=10, proxies=proxies)
+            r = requests.get(BASE_URL, params=params, timeout=10)
 
             # LOG RATE LIMIT HEADERS ON EVERY RESPONSE
             used_weight = r.headers.get("X-MBX-USED-WEIGHT-1M", "?")
