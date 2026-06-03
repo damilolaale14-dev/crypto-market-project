@@ -746,6 +746,8 @@ def run_hourly_for_symbol(
         return (bar_results if bar_results else None), new_cursor
 
     except Exception as e:
+        if "IP_BANNED" in str(e):
+            raise
         import traceback
         notifier.send_text(
             f"💥 *RUNNER EXCEPTION*\n"
