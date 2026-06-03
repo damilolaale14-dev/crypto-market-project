@@ -61,6 +61,7 @@ def run_hourly():
 
     symbol_summaries = []
     failed_symbols = []
+    ip_ban_wait = None
     for symbol in SYMBOLS:
         try:
             result = run_hourly_for_symbol(symbol)
@@ -70,16 +71,35 @@ def run_hourly():
                 summary = result
             symbol_summaries.append((symbol, summary))
         except Exception as sym_err:
-            import traceback
-            tb = traceback.format_exc()
-            failed_symbols.append(symbol)
-            notifier.send_text(
-                f"💥 *SYMBOL CRASH*\n"
-                f"Symbol: `{symbol}`\n"
-                f"Error: `{str(sym_err)[:300]}`\n"
-                f"Traceback:\n`{tb[:600]}`"
-            )
-            symbol_summaries.append((symbol, None))
+            err_str = str(sym_err)
+            if "IP_BANNED" in err_str:
+                # extract wait time for the summary notification
+                import re
+                match = re.search(r"wait (\d+)s", err_str)
+                if match and ip_ban_wait is None:
+                    ip_ban_wait = int(match.group(1))
+                failed_symbols.append(symbol)
+                symbol_summaries.append((symbol, None))
+            else:
+                import traceback
+                tb = traceback.format_exc()
+                failed_symbols.append(symbol)
+                notifier.send_text(
+                    f"💥 *SYMBOL CRASH*\n"
+                    f"Symbol: `{symbol}`\n"
+                    f"Error: `{str(sym_err)[:300]}`\n"
+                    f"Traceback:\n`{tb[:600]}`"
+                )
+                symbol_summaries.append((symbol, None))
+
+    if ip_ban_wait is not None:
+        banned_count = sum(1 for s, r in symbol_summaries if r is None and s in failed_symbols)
+        wait_mins = ip_ban_wait // 60
+        notifier.send_text(
+            f"🚫 *IP BANNED*\n"
+            f"`{banned_count}` symbols skipped\n"
+            f"Retry in `{wait_mins}m`"
+        )
 
     now = datetime.now(timezone.utc)
     local_now = now + pd.Timedelta(hours=1)  # WAT = UTC+1

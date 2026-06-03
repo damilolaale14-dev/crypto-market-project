@@ -153,8 +153,11 @@ def fetch_ohlcv(
 
         except Exception as e:
             print(f"[FETCH ERROR] attempt {attempt+1}: {e}")
-            if "429" in str(e) or "418" in str(e):
-                # try to read Retry-After from the response header
+            if "IP_BANNED" in str(e):
+                # rate_limiter already has the ban registered — just re-raise
+                # immediately so the symbol fails fast and stops hammering Binance
+                raise
+            elif "429" in str(e) or "418" in str(e):
                 retry_after = None
                 if hasattr(e, 'response') and e.response is not None:
                     retry_after = e.response.headers.get("Retry-After")
