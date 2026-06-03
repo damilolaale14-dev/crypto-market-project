@@ -19,9 +19,9 @@ def _tg_debug(msg: str) -> None:
         print(f"[TG DEBUG FALLBACK] {msg}")
 
 SYMBOLS = [
-    "LINKUSDT", "XRPUSDT", "PENDLEUSDT", "ETHUSDT", "AAVEUSDT", "FXSUSDT", 
+    "LINKUSDT", "XRPUSDT", "PENDLEUSDT", "ETHUSDT", "AAVEUSDT", "GMXUSDT", 
     "SOLUSDT", "LDOUSDT", "RUNEUSDT", "BANDUSDT", "TRBUSDT",  "ICPUSDT",
-    "ADAUSDT", "OPUSDT",
+    "ADAUSDT", "OPUSDT", "AXLUSDT", "ZILUSDT", "LSKUSDT"
 ]
 
 SIGNAL_STORE       = "data/signals.json"
