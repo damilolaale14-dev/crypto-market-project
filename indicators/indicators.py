@@ -605,16 +605,16 @@ def validated_breakouts(df, body_ratio=0.6, atr_mult=1.2):
 
     df['VALID_BREAK_LONG'] = (
         df['EARLY_EXPANSION'] &
-        # volume_confirmed &
-        flow_bias_long &
-        df['MICRO_BREAK_LONG']
+        displacement_long_ok &
+        flow_bias_long 
+        # df['MICRO_BREAK_LONG']
     )
 
     df['VALID_BREAK_SHORT'] = (
         df['EARLY_EXPANSION'] &
-        # volume_confirmed &
-        flow_bias_short &
-        df['MICRO_BREAK_SHORT']
+        displacement_short_ok &
+        flow_bias_short 
+        # df['MICRO_BREAK_SHORT']
     )
 
     _l = df.iloc[-1]
@@ -1636,7 +1636,7 @@ def expansion_maturity(df, lookback=20):
     # no longer early — you're chasing.
     # --------------------------------------------------
     df['EARLY_EXPANSION'] = (
-        # (df['EXPANSION_BARS'] <= 8) &
+        (df['EXPANSION_BARS'] <= 8) &
         # (df['EXPANSION_BARS'] >= 1) |
         flow_confirming
     )

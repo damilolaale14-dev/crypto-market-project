@@ -265,6 +265,19 @@ class PositionManager:
                 # if self._momentum_decay_exit(position):
                 #     try_exit("momentum_decay", current_price)
 
+                # ── STALL EXIT ──────────────────────────────────────────
+                _R     = abs(position["entry_price"] - position["initial_stop"])
+                _mfe_r = position.get("mfe_r", 0.0)
+                _mae_r = abs(position.get("MAE", 0.0)) / _R if _R > 0 else 0.0
+                _bars  = position.get("bars_in_trade", 0)
+
+                if _R > 0:
+                    if _bars == 3 and _mfe_r == 0.0 and _mae_r > 0.6:
+                        try_exit("stall_exit", current_price)
+                    elif _bars == self.VALIDATION_BARS and _mfe_r < 0.2 and _mae_r > 0.4:
+                        try_exit("stall_exit", current_price)
+                # ────────────────────────────────────────────────────────
+
                 if self._opposite_impulse_exit(window_5m, side, position):
                     try_exit("opposite_impulse", current_price)
 
@@ -367,11 +380,10 @@ class PositionManager:
             #     print(f"[ENTRY BLOCKED — NOT LATEST BAR] {symbol} signal_ts={signal_ts} latest={latest_bar_ts}")
             #     return {"state": "FLAT"}
 
-            signal_id = (
-                symbol + "|" +
-                str(external_row.name) + "|" +
-                str(signal)
-            )
+            _sig_ts = pd.Timestamp(external_row.name)
+            if _sig_ts.tzinfo is None:
+                _sig_ts = _sig_ts.tz_localize("UTC")
+            signal_id = f"{symbol}|{_sig_ts.isoformat()}|{signal}"
 
             if signal_id in self._executed_signals:
                 _tg_debug(
@@ -920,7 +932,7 @@ class PositionManager:
                 self._reentry_lock_ts = {}
                 for k, v in raw.items():
                     if isinstance(v, dict):
-                        locked_at = pd.Timestamp(v.get("locked_at", "2000-01-01"), tz="UTC")
+                        locked_at = pd.to_datetime(v.get("locked_at", "2000-01-01"), utc=True)
                         if locked_at >= cutoff:
                             self._reentry_lock[k] = int(v["direction"])
                             self._reentry_lock_ts[k] = locked_at
