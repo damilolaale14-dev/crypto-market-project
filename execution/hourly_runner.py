@@ -93,13 +93,30 @@ def run_hourly():
                 symbol_summaries.append((symbol, None))
 
     if ip_ban_wait is not None:
-        banned_count = sum(1 for s, r in symbol_summaries if r is None and s in failed_symbols)
-        wait_mins = ip_ban_wait // 60
-        notifier.send_text(
-            f"🚫 *IP BANNED*\n"
-            f"`{banned_count}` symbols skipped\n"
-            f"Retry in `{wait_mins}m`"
-        )
+        ban_notif_file = "data/last_ban_notif.json"
+        now_ts = datetime.now(timezone.utc)
+        last_notif = None
+        if os.path.exists(ban_notif_file):
+            try:
+                with open(ban_notif_file) as f:
+                    last_notif = datetime.fromisoformat(json.load(f).get("sent_at"))
+                    if last_notif.tzinfo is None:
+                        last_notif = last_notif.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        seconds_since = (now_ts - last_notif).total_seconds() if last_notif else 999
+        if seconds_since >= 60:
+            banned_count = sum(1 for s, r in symbol_summaries if r is None and s in failed_symbols)
+            wait_mins = ip_ban_wait // 60
+            notifier.send_text(
+                f"🚫 *IP BANNED*\n"
+                f"`{banned_count}` symbols skipped\n"
+                f"Retry in `{wait_mins}m`"
+            )
+            with open(ban_notif_file + ".tmp", "w") as f:
+                json.dump({"sent_at": now_ts.isoformat()}, f)
+            os.replace(ban_notif_file + ".tmp", ban_notif_file)
 
     now = datetime.now(timezone.utc)
     local_now = now + pd.Timedelta(hours=1)  # WAT = UTC+1
