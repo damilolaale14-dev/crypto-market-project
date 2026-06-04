@@ -48,9 +48,24 @@ def run_hourly():
 
     from data_pipeline.rate_limiter import rate_limiter
     if rate_limiter.is_banned():
-        wait_secs = int(rate_limiter.banned_until - time.time())
-        print(f"[RUN SKIPPED] IP ban still active ({wait_secs}s remaining + 60s buffer) — aborting")
-        notifier.send_text(f"🚫 *RUN SKIPPED*\nBan still active — `{wait_secs}s` remaining")
+        wait_secs = max(0, int(rate_limiter.banned_until + 300 - time.time()))
+        print(f"[RUN SKIPPED] IP ban still active ({wait_secs}s remaining) — aborting")
+        skip_notif_file = "data/last_skip_notif.json"
+        last_skip_notif = None
+        if os.path.exists(skip_notif_file):
+            try:
+                with open(skip_notif_file) as f:
+                    last_skip_notif = datetime.fromisoformat(json.load(f).get("sent_at"))
+                    if last_skip_notif.tzinfo is None:
+                        last_skip_notif = last_skip_notif.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+        seconds_since_skip = (datetime.now(timezone.utc) - last_skip_notif).total_seconds() if last_skip_notif else 999
+        if seconds_since_skip >= 300:
+            notifier.send_text(f"🚫 *RUN SKIPPED*\nBan still active — `{wait_secs // 60}m` remaining")
+            with open(skip_notif_file + ".tmp", "w") as f:
+                json.dump({"sent_at": datetime.now(timezone.utc).isoformat()}, f)
+            os.replace(skip_notif_file + ".tmp", skip_notif_file)
         return
 
     if os.path.exists("data/replay_lock.json"):
