@@ -30,18 +30,19 @@ class BinanceRateLimiter:
             }, f)
         os.replace(STATE_FILE + ".tmp", STATE_FILE)
 
-    def is_banned(self, buffer_secs=300) -> bool:
+    def is_banned(self, buffer_secs=900) -> bool:
         self._load()
         return time.time() < self.banned_until + buffer_secs
 
     def check(self):
         self._load()
         now = time.time()
-        ban_expires = self.banned_until + 300
+        ban_expires = self.banned_until + 900
         if now < ban_expires:
             raise RuntimeError(f"IP_BANNED — wait {int(ban_expires - now)}s")
-        if now < self.rate_limited_until:
-            wait = self.rate_limited_until - now
+        rate_limit_expires = self.rate_limited_until + 60  # 60s buffer after 429
+        if now < rate_limit_expires:
+            wait = rate_limit_expires - now
             print(f"[RATE LIMITER] sleeping {wait:.1f}s before next request")
             time.sleep(wait)
 

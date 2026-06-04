@@ -48,7 +48,7 @@ def run_hourly():
 
     from data_pipeline.rate_limiter import rate_limiter
     if rate_limiter.is_banned():
-        wait_secs = max(0, int(rate_limiter.banned_until + 300 - time.time()))
+        wait_secs = max(0, int(rate_limiter.banned_until + 900 - time.time()))
         print(f"[RUN SKIPPED] IP ban still active ({wait_secs}s remaining) — aborting")
         skip_notif_file = "data/last_skip_notif.json"
         last_skip_notif = None
