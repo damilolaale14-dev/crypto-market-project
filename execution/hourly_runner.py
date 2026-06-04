@@ -337,8 +337,10 @@ def run_hourly_for_symbol(
                 if is_5m_boundary or not os.path.exists(_cache_path(symbol, "5m")):
                     df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
                 else:
-                    # between 5m boundaries — 1H/4H from cache, but still fetch fresh 5m bars
-                    # so the cursor can advance every cron tick
+                    # between 5m boundaries — serve 1H/4H from cache.
+                    # Only fetch fresh 5m bars if the cache is actually behind
+                    # the current 5m boundary, preventing a Binance hit every
+                    # 10-second cron tick across all 17 symbols.
                     try:
                         now_utc_c = datetime.now(timezone.utc)
                         now_hour_c = now_utc_c.replace(minute=0, second=0, microsecond=0)
@@ -359,11 +361,8 @@ def run_hourly_for_symbol(
                             htf_scores = pd.read_parquet(_path_htf_scores)
                             htf_scores.index = pd.to_datetime(htf_scores.index, utc=True)
 
-                        # Fetch fresh 5m bars only when the cache is actually behind
-                        # the current 5m boundary. Comparing against wall clock (now_utc_c)
-                        # instead of the boundary caused a fetch on every 10-second cron
-                        # tick, hitting Binance ~120 times/minute across 20 symbols.
-                        from data_pipeline.updater import _fetch_all
+                        # Only hit Binance if 5m cache is genuinely behind the
+                        # current boundary — not on every cron tick.
                         lltf_df = pd.read_parquet(_cache_path(symbol, "5m"))
                         lltf_df.index = pd.to_datetime(lltf_df.index, utc=True)
 
@@ -371,24 +370,30 @@ def run_hourly_for_symbol(
                         _current_5m_boundary = pd.Timestamp(
                             now_utc_c.replace(minute=_minutes_floored, second=0, microsecond=0),
                             tz="UTC"
-                        ) if now_utc_c.tzinfo is not None else pd.Timestamp(
-                            now_utc_c.replace(minute=_minutes_floored, second=0, microsecond=0)
-                        ).tz_localize("UTC")
+                        )
 
                         if lltf_df.index[-1] < _current_5m_boundary:
-                            lltf_fetch_start = lltf_df.index[-1] + pd.Timedelta(minutes=5)
-                            lltf_fetch_end = pd.Timestamp(now_utc_c) if now_utc_c.tzinfo is not None else pd.Timestamp(now_utc_c).tz_localize("UTC")
-                            new_lltf = _fetch_all(symbol, "5m", lltf_fetch_start, lltf_fetch_end)
-                            if not new_lltf.empty:
-                                lltf_df = pd.concat([lltf_df, new_lltf])
-                                lltf_df = lltf_df[~lltf_df.index.duplicated(keep="last")]
-                                lltf_df = lltf_df.sort_index()
-                                tmp = _cache_path(symbol, "5m") + ".tmp"
-                                lltf_df.to_parquet(tmp)
-                                os.replace(tmp, _cache_path(symbol, "5m"))
-                            print(f"[CACHE SERVE] {symbol} — 1H/4H from cache, 5m fetched fresh (last={lltf_df.index[-1]})")
+                            # Cache is stale — fetch only the missing bars
+                            from data_pipeline.rate_limiter import rate_limiter
+                            if rate_limiter.is_banned():
+                                print(f"[CACHE SERVE] {symbol} — 5m stale but IP banned, skipping fetch")
+                            else:
+                                from data_pipeline.updater import _fetch_all
+                                lltf_fetch_start = lltf_df.index[-1] + pd.Timedelta(minutes=5)
+                                lltf_fetch_end = pd.Timestamp(now_utc_c).tz_localize("UTC") if now_utc_c.tzinfo is None else pd.Timestamp(now_utc_c)
+                                new_lltf = _fetch_all(symbol, "5m", lltf_fetch_start, lltf_fetch_end)
+                                if not new_lltf.empty:
+                                    lltf_df = pd.concat([lltf_df, new_lltf])
+                                    lltf_df = lltf_df[~lltf_df.index.duplicated(keep="last")]
+                                    lltf_df = lltf_df.sort_index()
+                                    tmp = _cache_path(symbol, "5m") + ".tmp"
+                                    lltf_df.to_parquet(tmp)
+                                    os.replace(tmp, _cache_path(symbol, "5m"))
+                            print(f"[CACHE SERVE] {symbol} — 1H/4H from cache, 5m fetched (last={lltf_df.index[-1]})")
                         else:
-                            print(f"[CACHE SERVE] {symbol} — 1H/4H from cache, 5m already current (last={lltf_df.index[-1]})")
+                            # 5m cache is already current — no Binance call needed
+                            print(f"[CACHE SERVE] {symbol} — all from cache, 5m current (last={lltf_df.index[-1]})")
+
                     except Exception as cache_err:
                         print(f"[CACHE SERVE FAILED] {symbol} — {cache_err}, falling back to update_symbol")
                         df, htf_df, lltf_df, htf_scores = update_symbol(symbol)
