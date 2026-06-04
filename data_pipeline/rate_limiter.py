@@ -35,9 +35,11 @@ class BinanceRateLimiter:
         return time.time() < self.banned_until + buffer_secs
 
     def check(self):
+        self._load()
         now = time.time()
-        if now < self.banned_until:
-            raise RuntimeError(f"IP_BANNED — wait {int(self.banned_until - now)}s")
+        ban_expires = self.banned_until + 300
+        if now < ban_expires:
+            raise RuntimeError(f"IP_BANNED — wait {int(ban_expires - now)}s")
         if now < self.rate_limited_until:
             wait = self.rate_limited_until - now
             print(f"[RATE LIMITER] sleeping {wait:.1f}s before next request")
